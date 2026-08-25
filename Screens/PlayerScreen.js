@@ -36,9 +36,13 @@ export default function PlayerScreen({ route, navigation }) {
     episode = 1,
     title = "StreamGlass",
     poster_path,
+    isAnime: paramIsAnime = false,
+    audioTrack = "sub",
     streamUrl: initialStreamUrl,
     streamHeaders: initialHeaders,
   } = route.params || {};
+
+  const isAnime = type === "anime" || Boolean(paramIsAnime);
 
   const [activeStreamUrl, setActiveStreamUrl] = useState(initialStreamUrl || null);
   const [activeHeaders, setActiveHeaders] = useState(initialHeaders || null);
