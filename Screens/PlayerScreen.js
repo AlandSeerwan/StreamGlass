@@ -1,7 +1,7 @@
 import { StatusBar } from "expo-status-bar";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { ArrowLeft, RefreshCw, AlertCircle } from "lucide-react-native";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -9,6 +9,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { WebView } from "react-native-webview";
 import { BlurView } from "expo-blur";
 import { saveToHistory } from "../services/storage";
 import { extractStream } from "../services/extractor";
@@ -27,18 +28,22 @@ export default function PlayerScreen({ route, navigation }) {
 
   const [activeStreamUrl, setActiveStreamUrl] = useState(initialStreamUrl || null);
   const [activeHeaders, setActiveHeaders] = useState(initialHeaders || null);
-  const [subtitles, setSubtitles] = useState([]);
+  const [isDirectVideo, setIsDirectVideo] = useState(
+    initialStreamUrl ? /\.(m3u8|mp4|webm)(\?.*)?$/i.test(initialStreamUrl) : false
+  );
   const [loading, setLoading] = useState(!initialStreamUrl);
   const [statusMessage, setStatusMessage] = useState(
-    initialStreamUrl ? "Starting playback..." : "Extracting stream from serverless provider..."
+    initialStreamUrl ? "Starting playback..." : "Connecting to stream provider..."
   );
   const [error, setError] = useState(null);
 
   const player = useVideoPlayer(
-    activeStreamUrl ? { uri: activeStreamUrl, headers: activeHeaders || {} } : null,
+    isDirectVideo && activeStreamUrl
+      ? { uri: activeStreamUrl, headers: activeHeaders || {} }
+      : null,
     (createdPlayer) => {
       createdPlayer.keepScreenOnWhilePlaying = true;
-      if (activeStreamUrl) {
+      if (isDirectVideo && activeStreamUrl) {
         createdPlayer.play();
       }
     }
@@ -48,43 +53,65 @@ export default function PlayerScreen({ route, navigation }) {
     if (initialStreamUrl) {
       setActiveStreamUrl(initialStreamUrl);
       setActiveHeaders(initialHeaders);
+      setIsDirectVideo(/\.(m3u8|mp4|webm)(\?.*)?$/i.test(initialStreamUrl));
       setLoading(false);
       return;
     }
 
     setLoading(true);
     setError(null);
-    setStatusMessage("Connecting to VidSrc serverless extractor...");
+    setStatusMessage("Extracting stream for " + title + "...");
 
     try {
-      setStatusMessage("Extracting HLS stream & subtitles...");
       const result = await extractStream({ id, type, season, episode });
 
       if (result && result.streamUrl) {
+        const isDirect =
+          result.isM3U8 || /\.(m3u8|mp4|webm)(\?.*)?$/i.test(result.streamUrl);
+
         setActiveStreamUrl(result.streamUrl);
         setActiveHeaders(result.headers || {});
-        if (result.subtitles) setSubtitles(result.subtitles);
-        setStatusMessage("Stream resolved. Loading native player...");
+        setIsDirectVideo(isDirect);
+        setStatusMessage("Loading player...");
 
-        if (player) {
-          player.replace({
-            uri: result.streamUrl,
-            headers: result.headers || {},
-          });
+        if (isDirect && player) {
+          if (typeof player.replaceAsync === "function") {
+            await player.replaceAsync({
+              uri: result.streamUrl,
+              headers: result.headers || {},
+            });
+          } else if (typeof player.replace === "function") {
+            player.replace({
+              uri: result.streamUrl,
+              headers: result.headers || {},
+            });
+          }
           player.play();
         }
         setLoading(false);
       } else {
-        throw new Error("No playable HLS stream found in extractor response.");
+        // Fallback directly to provider embed
+        const fallbackUrl =
+          type === "tv"
+            ? `https://vixsrc.to/tv/${id}/${season}/${episode}`
+            : `https://vixsrc.to/movie/${id}`;
+
+        setActiveStreamUrl(fallbackUrl);
+        setIsDirectVideo(false);
+        setLoading(false);
       }
-    } catch (err) {
-      setError(
-        err.message ||
-          "Failed to extract direct stream. Please check your extractor instance or connection."
-      );
+    } catch {
+      // Fallback directly to provider embed
+      const fallbackUrl =
+        type === "tv"
+          ? `https://vixsrc.to/tv/${id}/${season}/${episode}`
+          : `https://vixsrc.to/movie/${id}`;
+
+      setActiveStreamUrl(fallbackUrl);
+      setIsDirectVideo(false);
       setLoading(false);
     }
-  }, [id, type, season, episode, initialStreamUrl, initialHeaders, player]);
+  }, [id, type, season, episode, title, initialStreamUrl, initialHeaders, player]);
 
   useEffect(() => {
     resolveStream();
@@ -107,15 +134,48 @@ export default function PlayerScreen({ route, navigation }) {
 
       {activeStreamUrl && !loading && !error ? (
         <View style={styles.videoFrame}>
-          <VideoView
-            player={player}
-            style={styles.video}
-            nativeControls
-            contentFit="contain"
-            fullscreenOptions={{ enable: true }}
-            allowsPictureInPicture
-            surfaceType="surfaceView"
-          />
+          {isDirectVideo ? (
+            <VideoView
+              player={player}
+              style={styles.video}
+              nativeControls
+              contentFit="contain"
+              fullscreenOptions={{ enable: true }}
+              allowsPictureInPicture
+              surfaceType="surfaceView"
+            />
+          ) : (
+            <WebView
+              source={{
+                uri: activeStreamUrl,
+                headers: {
+                  Referer: "https://vixsrc.to/",
+                  "User-Agent":
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                },
+              }}
+              style={styles.webview}
+              allowsFullscreenVideo
+              javaScriptEnabled
+              domStorageEnabled
+              mediaPlaybackRequiresUserAction={false}
+              allowsInlineMediaPlayback
+              androidHardwareAccelerationDisabled={false}
+              setSupportMultipleWindows={false}
+              onShouldStartLoadWithRequest={(request) => {
+                // Prevent external redirect popups
+                return (
+                  request.url.includes("vixsrc") ||
+                  request.url.includes("vidsrc") ||
+                  request.url.includes("m3u8") ||
+                  request.url.includes("stream") ||
+                  request.url.startsWith("about:") ||
+                  request.url.startsWith("blob:")
+                );
+              }}
+            />
+          )}
+
           <Pressable
             accessibilityLabel="Go back"
             hitSlop={12}
@@ -124,12 +184,15 @@ export default function PlayerScreen({ route, navigation }) {
           >
             <ArrowLeft color="#fff" size={22} />
           </Pressable>
-          <View pointerEvents="none" style={styles.titleOverlay}>
-            <Text numberOfLines={1} style={styles.titleText}>
-              {title}
-              {type === "tv" ? ` - S${season} E${episode}` : ""}
-            </Text>
-          </View>
+
+          {isDirectVideo && (
+            <View pointerEvents="none" style={styles.titleOverlay}>
+              <Text numberOfLines={1} style={styles.titleText}>
+                {title}
+                {type === "tv" ? ` - S${season} E${episode}` : ""}
+              </Text>
+            </View>
+          )}
         </View>
       ) : loading ? (
         <View style={styles.centerContainer}>
@@ -167,7 +230,7 @@ export default function PlayerScreen({ route, navigation }) {
 
           <BlurView tint="dark" intensity={90} style={styles.glassCard}>
             <AlertCircle color="#FF453A" size={42} style={{ marginBottom: 12 }} />
-            <Text style={styles.errorTitle}>Stream Extraction Failed</Text>
+            <Text style={styles.errorTitle}>Stream Unavailable</Text>
             <Text style={styles.errorMessage}>{error}</Text>
 
             <Pressable
@@ -176,7 +239,7 @@ export default function PlayerScreen({ route, navigation }) {
               android_ripple={{ color: "rgba(0,0,0,0.15)" }}
             >
               <RefreshCw color="#000000" size={18} style={{ marginRight: 8 }} />
-              <Text style={styles.retryText}>Retry Extraction</Text>
+              <Text style={styles.retryText}>Retry Playback</Text>
             </Pressable>
           </BlurView>
         </View>
@@ -188,7 +251,8 @@ export default function PlayerScreen({ route, navigation }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000000" },
   videoFrame: { flex: 1, backgroundColor: "#000000" },
-  video: { flex: 1 },
+  video: { flex: 1, backgroundColor: "#000000" },
+  webview: { flex: 1, backgroundColor: "#000000" },
   backButton: {
     position: "absolute",
     top: 24,
@@ -201,7 +265,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0, 0, 0, 0.65)",
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.15)",
-    zIndex: 10,
+    zIndex: 999,
   },
   backButtonTop: {
     position: "absolute",
@@ -215,7 +279,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255, 255, 255, 0.1)",
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.15)",
-    zIndex: 10,
+    zIndex: 999,
   },
   titleOverlay: {
     position: "absolute",

@@ -87,12 +87,13 @@ function normalizeExtractorResponse(data) {
     }));
   }
 
-  if (!streamUrl || typeof streamUrl !== "string") {
-    return null;
-  }
+  const isM3U8 =
+    Boolean(data.sources?.[0]?.isM3U8) ||
+    /\.(m3u8|mp4|webm)(\?.*)?$/i.test(streamUrl);
 
   return {
     streamUrl,
+    isM3U8,
     headers,
     subtitles,
     quality,
