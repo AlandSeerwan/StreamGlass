@@ -35,6 +35,27 @@ const NETFLIX_RED = "#E50914";
 const HUD_BG = "rgba(0, 0, 0, 0.55)";
 const HIDE_DELAY = 4000;
 
+const INJECTED_AD_BLOCKER = `
+  (function() {
+    try {
+      window.open = function() { return null; };
+      const style = document.createElement('style');
+      style.innerHTML = \`
+        iframe[src*="ad"], iframe[src*="pop"], iframe[src*="click"], iframe[src*="bet"],
+        .ad-container, .ad-box, .popunder, #disqus_thread, div[class*="ad-"], div[id*="ad-"],
+        div[class*="popup"], div[id*="popup"], .vignette-ad, .ad-banner {
+          display: none !important;
+          opacity: 0 !important;
+          pointer-events: none !important;
+          visibility: hidden !important;
+        }
+      \`;
+      document.head.appendChild(style);
+    } catch(e) {}
+  })();
+  true;
+`;
+
 export default function PlayerScreen({ route, navigation }) {
   const {
     id,
@@ -355,7 +376,7 @@ export default function PlayerScreen({ route, navigation }) {
               nativeControls={false}
               contentFit={contentFit}
               allowsPictureInPicture
-              surfaceType="surfaceView"
+              surfaceType="textureView"
             />
           ) : (
             <WebView
@@ -393,21 +414,39 @@ export default function PlayerScreen({ route, navigation }) {
               allowsInlineMediaPlayback
               androidHardwareAccelerationDisabled={false}
               setSupportMultipleWindows={false}
+              injectedJavaScriptBeforeContentLoaded={INJECTED_AD_BLOCKER}
+              injectedJavaScript={INJECTED_AD_BLOCKER}
               onShouldStartLoadWithRequest={(request) => {
+                const url = request.url.toLowerCase();
+                if (
+                  url.includes("adsterra") ||
+                  url.includes("popcash") ||
+                  url.includes("onclick") ||
+                  url.includes("bet") ||
+                  url.includes("casino") ||
+                  url.includes("doubleclick") ||
+                  url.includes("syndication") ||
+                  url.includes("exoclick") ||
+                  url.includes("juicyads") ||
+                  url.includes("trafficjunky") ||
+                  url.includes("redirect")
+                ) {
+                  return false;
+                }
                 return (
-                  request.url.includes("vixsrc") ||
-                  request.url.includes("vidsrc") ||
-                  request.url.includes("miruro") ||
-                  request.url.includes("megavid") ||
-                  request.url.includes("anixo") ||
-                  request.url.includes("autoembed") ||
-                  request.url.includes("smashy") ||
-                  request.url.includes("2embed") ||
-                  request.url.includes("anime") ||
-                  request.url.includes("m3u8") ||
-                  request.url.includes("stream") ||
-                  request.url.startsWith("about:") ||
-                  request.url.startsWith("blob:")
+                  url.includes("vixsrc") ||
+                  url.includes("vidsrc") ||
+                  url.includes("miruro") ||
+                  url.includes("megavid") ||
+                  url.includes("anixo") ||
+                  url.includes("autoembed") ||
+                  url.includes("smashy") ||
+                  url.includes("2embed") ||
+                  url.includes("anime") ||
+                  url.includes("m3u8") ||
+                  url.includes("stream") ||
+                  url.startsWith("about:") ||
+                  url.startsWith("blob:")
                 );
               }}
             />
@@ -420,8 +459,10 @@ export default function PlayerScreen({ route, navigation }) {
           />
 
           {/* ═══ Netflix HUD Overlay ═══ */}
-          {controlsVisible && (
-            <View style={styles.hudOverlay} pointerEvents="box-none">
+          <View
+            style={[styles.hudOverlay, { opacity: controlsVisible ? 1 : 0 }]}
+            pointerEvents={controlsVisible ? "box-none" : "none"}
+          >
 
                 {/* ── Top Bar ── */}
                 <View style={styles.topBar}>
@@ -586,7 +627,6 @@ export default function PlayerScreen({ route, navigation }) {
                   <View style={{ flex: 1 }} />
                 )}
               </View>
-            )}
           </View>
         ) : loading ? (
         /* ── Loading State ── */

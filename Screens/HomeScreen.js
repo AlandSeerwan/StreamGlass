@@ -211,7 +211,7 @@ export default function HomeScreen({ navigation }) {
   };
 
   const heroImage = heroItem?.backdrop_path || heroItem?.poster_path;
-  const heroBackdropUri = heroImage ? getImageUrl(heroImage, "w780") : null;
+  const heroBackdropUri = heroImage ? getImageUrl(heroImage, "w1280") : null;
 
   return (
     <ScrollView
@@ -234,16 +234,15 @@ export default function HomeScreen({ navigation }) {
               style={StyleSheet.absoluteFillObject}
               contentFit="cover"
               priority="high"
-              transition={300}
+              transition={200}
             />
           )}
 
-          {/* Vignette Overlay */}
-          <View pointerEvents="none" style={styles.heroGradientOverlay} />
+          {/* Bottom Dark Gradient Fade */}
           <View pointerEvents="none" style={styles.heroBottomFade} />
 
-          {/* Glass Hero Card */}
-          <BlurView tint="dark" intensity={85} style={styles.heroGlassCard}>
+          {/* Clean Floating Content (Netflix/Apple TV style) */}
+          <View style={styles.heroContentContainer}>
             <View style={styles.heroBadgeRow}>
               <View style={styles.heroTypePill}>
                 <Sparkles color="#FFFFFF" size={12} style={{ marginRight: 4 }} />
@@ -311,7 +310,7 @@ export default function HomeScreen({ navigation }) {
                 ))}
               </View>
             )}
-          </BlurView>
+          </View>
         </View>
       )}
 
@@ -442,16 +441,12 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: "45%",
-    backgroundColor: "rgba(0, 0, 0, 0.55)",
+    height: "65%",
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
   },
-  heroGlassCard: {
+  heroContentContainer: {
     width: "100%",
-    padding: 20,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.18)",
-    overflow: "hidden",
+    padding: 16,
   },
   heroBadgeRow: {
     flexDirection: "row",
