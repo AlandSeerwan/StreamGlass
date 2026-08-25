@@ -2,6 +2,7 @@ import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
 import { useEffect, useState, useCallback } from "react";
 import {
+  ActivityIndicator,
   FlatList,
   RefreshControl,
   StyleSheet,
@@ -10,13 +11,14 @@ import {
   View,
 } from "react-native";
 import { Sparkles, Star } from "lucide-react-native";
-import { getTrendingAnime } from "../services/api";
+import { getTrendingAnime, findMediaByTitle } from "../services/api";
 
 export default function AnimeScreen({ navigation }) {
   const [animeList, setAnimeList] = useState([]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [resolvingId, setResolvingId] = useState(null);
 
   const fetchAnime = useCallback(async (pageNum = 1, append = false) => {
     setLoading(true);
@@ -50,6 +52,37 @@ export default function AnimeScreen({ navigation }) {
     }
   };
 
+  const handleAnimePress = async (item) => {
+    const searchTitle =
+      item.title?.english || item.title?.romaji || item.title?.native;
+
+    if (!searchTitle) return;
+
+    setResolvingId(item.id);
+    try {
+      // Find matching TMDB item for seamless streaming & episode metadata
+      const tmdbMatch = await findMediaByTitle(searchTitle);
+
+      if (tmdbMatch && tmdbMatch.id) {
+        navigation.navigate("Details", {
+          id: tmdbMatch.id,
+          type: tmdbMatch.media_type || "tv",
+        });
+      } else {
+        // Fallback to SearchTab
+        navigation.navigate("SearchTab", {
+          initialQuery: searchTitle,
+        });
+      }
+    } catch {
+      navigation.navigate("SearchTab", {
+        initialQuery: searchTitle,
+      });
+    } finally {
+      setResolvingId(null);
+    }
+  };
+
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -59,7 +92,7 @@ export default function AnimeScreen({ navigation }) {
           <Text style={styles.headerTitle}>Anime</Text>
         </View>
         <Text style={styles.headerSubtitle}>
-          Trending Japanese animation via AniList
+          Trending Japanese animation via AniList & TMDB
         </Text>
       </View>
 
@@ -85,17 +118,14 @@ export default function AnimeScreen({ navigation }) {
           const coverUrl =
             item.coverImage?.extraLarge || item.coverImage?.large;
           const score = item.averageScore ? (item.averageScore / 10).toFixed(1) : null;
+          const isResolving = resolvingId === item.id;
 
           return (
             <TouchableOpacity
               style={styles.card}
               activeOpacity={0.85}
-              onPress={() => {
-                // Navigate to search or player with anime title
-                navigation.navigate("SearchTab", {
-                  initialQuery: title,
-                });
-              }}
+              disabled={isResolving}
+              onPress={() => handleAnimePress(item)}
             >
               <Image
                 source={{ uri: coverUrl }}
@@ -103,12 +133,20 @@ export default function AnimeScreen({ navigation }) {
                 contentFit="cover"
                 transition={250}
               />
+
+              {isResolving ? (
+                <View style={styles.resolvingOverlay}>
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                </View>
+              ) : null}
+
               {score ? (
                 <BlurView tint="dark" intensity={80} style={styles.ratingBadge}>
                   <Star color="#FFD700" size={10} fill="#FFD700" style={{ marginRight: 3 }} />
                   <Text style={styles.ratingText}>{score}</Text>
                 </BlurView>
               ) : null}
+
               <Text numberOfLines={1} style={styles.cardTitle}>
                 {title}
               </Text>
@@ -163,6 +201,13 @@ const styles = StyleSheet.create({
     backgroundColor: "#161618",
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.1)",
+  },
+  resolvingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 14,
+    backgroundColor: "rgba(0, 0, 0, 0.65)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   ratingBadge: {
     position: "absolute",

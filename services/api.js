@@ -90,6 +90,15 @@ export async function searchMedia(query) {
     : [];
 }
 
+export async function findMediaByTitle(title) {
+  if (!title || !title.trim()) return null;
+  const results = await searchMedia(title);
+  if (results && results.length > 0) {
+    return results[0];
+  }
+  return null;
+}
+
 export async function getDetails(id, type) {
   return request(`/${type}/${id}?append_to_response=credits,similar,recommendations`);
 }
