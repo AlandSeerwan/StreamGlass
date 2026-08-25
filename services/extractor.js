@@ -9,6 +9,8 @@ export const DEFAULT_EXTRACTOR_ENDPOINTS = [
   "https://vidsrc-new.vercel.app",
 ];
 
+export const MIRURO_API_BASE = "https://miruro-api-beta.vercel.app";
+
 /**
  * Get current configured extractor endpoint (or fallback to defaults)
  */
@@ -71,7 +73,6 @@ function normalizeExtractorResponse(data) {
   if (data.headers && typeof data.headers === "object") {
     headers = data.headers;
   } else if (!headers.Referer) {
-    // Default safe Referer header required by many HLS manifests
     headers = {
       Referer: "https://vidsrc.to/",
       "User-Agent":
@@ -101,14 +102,73 @@ function normalizeExtractorResponse(data) {
 }
 
 /**
- * Extract direct HLS / MP4 stream link from a vidsrc-api / vidsrc-new serverless instance
- * @param {Object} params
- * @param {string|number} params.id - TMDB ID
- * @param {string} params.type - 'movie' or 'tv'
- * @param {number} [params.season] - Season number (for TV)
- * @param {number} [params.episode] - Episode number (for TV)
+ * Extract Anime stream from Miruro API (AniList ID + Episode + Sub/Dub)
  */
-export async function extractStream({ id, type = "movie", season = 1, episode = 1 }) {
+export async function extractAnimeStream({ id, episode = 1, audioTrack = "sub" }) {
+  const lang = audioTrack === "dub" ? "dub" : "sub";
+  const targetUrl = `${MIRURO_API_BASE}/api/embed/${id}/${episode}?lang=${lang}`;
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+    const response = await fetch(targetUrl, {
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+      },
+    });
+
+    clearTimeout(timeoutId);
+
+    if (response.ok) {
+      const json = await response.json();
+      const providers = json?.results?.providers || [];
+
+      if (providers.length > 0) {
+        // Prefer megavid or anixo
+        const primary =
+          providers.find((p) => p.id === "megavid") ||
+          providers.find((p) => p.id === "anixo") ||
+          providers[0];
+
+        if (primary && primary.url) {
+          return {
+            streamUrl: primary.url,
+            isM3U8: false,
+            providerName: primary.name,
+            headers: {
+              Referer: "https://miruro.tv/",
+              "User-Agent":
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            },
+          };
+        }
+      }
+    }
+  } catch {
+    // fallback below
+  }
+
+  // Fallback to direct megavid/autoembed schema
+  return {
+    streamUrl: `https://megavid.buzz/ani/${id}/${episode}/${lang}?autoplay=true`,
+    isM3U8: false,
+    providerName: "Megavid",
+    headers: {
+      Referer: "https://megavid.buzz/",
+    },
+  };
+}
+
+/**
+ * Extract direct HLS / MP4 stream link from a vidsrc-api / vixsrc instance
+ */
+export async function extractStream({ id, type = "movie", season = 1, episode = 1, audioTrack = "sub" }) {
+  if (type === "anime") {
+    return extractAnimeStream({ id, episode, audioTrack });
+  }
+
   const customBaseUrl = await getExtractorBaseUrl();
   const endpointsToTry = [
     customBaseUrl,
@@ -118,18 +178,17 @@ export async function extractStream({ id, type = "movie", season = 1, episode = 
   let lastError = null;
 
   for (const baseUrl of endpointsToTry) {
-    // Build path variants supported across vidsrc-api / vidsrc-new distributions
     const pathVariants =
       type === "tv"
         ? [
             `/vidsrc/${id}/${season}/${episode}`,
             `/tv/${id}/${season}/${episode}`,
-            `/api/source?id=${id}&type=tv&season=${season}&episode=${episode}`,
+            `/api/vidsrc?id=${id}&type=tv&season=${season}&episode=${episode}`,
           ]
         : [
             `/vidsrc/${id}`,
             `/movie/${id}`,
-            `/api/source?id=${id}&type=movie`,
+            `/api/vidsrc?id=${id}&type=movie`,
           ];
 
     for (const path of pathVariants) {
@@ -162,6 +221,6 @@ export async function extractStream({ id, type = "movie", season = 1, episode = 
 
   throw new Error(
     lastError?.message ||
-      `Failed to extract native stream for TMDB ID ${id}. Ensure the extractor server is running.`
+      `Failed to extract stream for ID ${id}. Ensure extractor is running.`
   );
 }

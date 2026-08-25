@@ -176,7 +176,7 @@ export default function PlayerScreen({ route, navigation }) {
     setStatusMessage("Extracting stream for " + title + "...");
 
     try {
-      const result = await extractStream({ id, type, season, episode });
+      const result = await extractStream({ id, type, season, episode, audioTrack });
 
       if (result && result.streamUrl) {
         const isDirect =
@@ -206,7 +206,7 @@ export default function PlayerScreen({ route, navigation }) {
       } else {
         const fallbackUrl =
           type === "anime" || isAnime
-            ? `https://autoembed.cc/embed/anime/${id}/${episode || 1}`
+            ? `https://megavid.buzz/ani/${id}/${episode || 1}/${audioTrack || 'sub'}?autoplay=true`
             : type === "tv"
               ? `https://vixsrc.to/tv/${id}/${season}/${episode}`
               : `https://vixsrc.to/movie/${id}`;
@@ -218,7 +218,7 @@ export default function PlayerScreen({ route, navigation }) {
     } catch {
       const fallbackUrl =
         type === "anime" || isAnime
-          ? `https://autoembed.cc/embed/anime/${id}/${episode || 1}`
+          ? `https://megavid.buzz/ani/${id}/${episode || 1}/${audioTrack || 'sub'}?autoplay=true`
           : type === "tv"
             ? `https://vixsrc.to/tv/${id}/${season}/${episode}`
             : `https://vixsrc.to/movie/${id}`;
@@ -227,7 +227,7 @@ export default function PlayerScreen({ route, navigation }) {
       setIsDirectVideo(false);
       setLoading(false);
     }
-  }, [id, type, season, episode, isAnime, title, initialStreamUrl, initialHeaders, player, resetHideTimer]);
+  }, [id, type, season, episode, isAnime, audioTrack, title, initialStreamUrl, initialHeaders, player, resetHideTimer]);
 
   useEffect(() => {
     resolveStream();
@@ -238,11 +238,11 @@ export default function PlayerScreen({ route, navigation }) {
       id,
       type,
       season: type === "tv" ? season : undefined,
-      episode: type === "tv" ? episode : undefined,
+      episode: type === "tv" || isAnime ? episode : undefined,
       title,
       poster_path,
     }).catch(() => {});
-  }, [id, type, season, episode, title, poster_path]);
+  }, [id, type, season, episode, isAnime, title, poster_path]);
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
@@ -267,8 +267,8 @@ export default function PlayerScreen({ route, navigation }) {
               <WebView
                 source={{
                   uri: activeStreamUrl,
-                  headers: {
-                    Referer: "https://vixsrc.to/",
+                  headers: activeHeaders || {
+                    Referer: "https://miruro.tv/",
                     "User-Agent":
                       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                   },
@@ -285,6 +285,9 @@ export default function PlayerScreen({ route, navigation }) {
                   return (
                     request.url.includes("vixsrc") ||
                     request.url.includes("vidsrc") ||
+                    request.url.includes("miruro") ||
+                    request.url.includes("megavid") ||
+                    request.url.includes("anixo") ||
                     request.url.includes("autoembed") ||
                     request.url.includes("smashy") ||
                     request.url.includes("2embed") ||
