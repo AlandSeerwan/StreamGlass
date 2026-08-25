@@ -1,6 +1,6 @@
 import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   FlatList,
   StyleSheet,
@@ -32,6 +32,8 @@ export default function SearchScreen({ route, navigation }) {
     }
   }, [route?.params?.initialQuery]);
 
+  const abortRef = useRef(null);
+
   useEffect(() => {
     if (!query.trim()) {
       setResults([]);
@@ -39,14 +41,22 @@ export default function SearchScreen({ route, navigation }) {
     }
 
     setSearching(true);
+
     const timer = setTimeout(() => {
+      // Cancel any in-flight request
+      if (abortRef.current) abortRef.current.abort();
+      abortRef.current = new AbortController();
+
       searchMedia(query)
         .then((res) => setResults(res || []))
         .catch(() => setResults([]))
         .finally(() => setSearching(false));
     }, 300);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      if (abortRef.current) abortRef.current.abort();
+    };
   }, [query]);
 
   return (
@@ -99,7 +109,11 @@ export default function SearchScreen({ route, navigation }) {
         numColumns={3}
         contentContainerStyle={styles.list}
         columnWrapperStyle={styles.gridRow}
-        keyExtractor={(item) => `${item.media_type}-${item.id}`}
+        keyExtractor={(item) => `${item?.media_type ?? "item"}-${item?.id}`}
+        initialNumToRender={9}
+        maxToRenderPerBatch={6}
+        windowSize={7}
+        removeClippedSubviews
         renderItem={({ item }) => {
           const posterUrl = getImageUrl(item.poster_path, "w500");
           const isTv = item.media_type === "tv";

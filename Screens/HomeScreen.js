@@ -1,6 +1,5 @@
-import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef, memo } from "react";
 import {
   Dimensions,
   FlatList,
@@ -11,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { BlurView } from "expo-blur";
 import {
   Play,
   Info,
@@ -32,6 +32,83 @@ import { getHistory, saveToHistory } from "../services/storage";
 
 const { width, height } = Dimensions.get("window");
 
+// ═══════════════════════════════════════════════════════════
+// Memoized Card Components
+// ═══════════════════════════════════════════════════════════
+
+const PosterCard = memo(({ item, onPress }) => {
+  const posterUrl = getImageUrl(item?.poster_path, "w500");
+  const rating = item?.vote_average ? item.vote_average.toFixed(1) : null;
+  const title = item?.title || item?.name || "Untitled";
+
+  return (
+    <TouchableOpacity
+      style={styles.posterCard}
+      activeOpacity={0.85}
+      onPress={onPress}
+    >
+      <Image
+        source={{ uri: posterUrl }}
+        style={styles.posterImage}
+        contentFit="cover"
+        transition={300}
+        recyclingKey={`poster-${item?.id}`}
+      />
+      {rating && (
+        <BlurView tint="dark" intensity={85} style={styles.ratingBadge}>
+          <Star color="#FFD700" size={11} fill="#FFD700" style={{ marginRight: 3 }} />
+          <Text style={styles.ratingText}>{rating}</Text>
+        </BlurView>
+      )}
+      <Text numberOfLines={1} style={styles.cardTitle}>
+        {title}
+      </Text>
+    </TouchableOpacity>
+  );
+});
+
+const HistoryCard = memo(({ item, onPress }) => {
+  const posterUrl = getImageUrl(item?.poster_path, "w500");
+
+  return (
+    <TouchableOpacity
+      style={styles.historyCard}
+      activeOpacity={0.85}
+      onPress={onPress}
+    >
+      <Image
+        source={{ uri: posterUrl }}
+        style={styles.historyPoster}
+        contentFit="cover"
+        transition={250}
+        recyclingKey={`history-${item?.id}`}
+      />
+      <View style={styles.historyGradient} />
+      <View style={styles.historyMeta}>
+        <View style={styles.historyMetaLeft}>
+          <Text numberOfLines={1} style={styles.historyTitle}>
+            {item?.title || "Untitled"}
+          </Text>
+          {item?.type === "tv" && item?.season && item?.episode ? (
+            <Text style={styles.historySub}>
+              S{item.season} · E{item.episode}
+            </Text>
+          ) : (
+            <Text style={styles.historySub}>Movie</Text>
+          )}
+        </View>
+        <View style={styles.historyPlayIcon}>
+          <Play color="#000000" size={14} fill="#000000" />
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+// ═══════════════════════════════════════════════════════════
+// HomeScreen
+// ═══════════════════════════════════════════════════════════
+
 export default function HomeScreen({ navigation }) {
   const [trending, setTrending] = useState([]);
   const [topMovies, setTopMovies] = useState([]);
@@ -40,6 +117,7 @@ export default function HomeScreen({ navigation }) {
   const [history, setHistory] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [heroIndex, setHeroIndex] = useState(0);
+  const heroTimerRef = useRef(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -74,13 +152,27 @@ export default function HomeScreen({ navigation }) {
     loadData();
   }, [loadData]);
 
+  // Hero auto-rotate every 6 seconds
+  const heroList = trending.slice(0, 5);
+
+  useEffect(() => {
+    if (heroList.length <= 1) return;
+
+    heroTimerRef.current = setInterval(() => {
+      setHeroIndex((prev) => (prev + 1) % heroList.length);
+    }, 6000);
+
+    return () => {
+      if (heroTimerRef.current) clearInterval(heroTimerRef.current);
+    };
+  }, [heroList.length]);
+
   const onRefresh = async () => {
     setRefreshing(true);
     await loadData();
     setRefreshing(false);
   };
 
-  const heroList = trending.slice(0, 5);
   const heroItem = heroList[heroIndex] || trending[0];
 
   const typeFor = (item) => item?.media_type || item?.type || "movie";
@@ -90,137 +182,26 @@ export default function HomeScreen({ navigation }) {
     const type = typeFor(item);
     try {
       await saveToHistory({
-        id: item.id,
+        id: item?.id,
         type,
         title: titleFor(item),
-        poster_path: item.poster_path,
+        poster_path: item?.poster_path,
       });
     } catch {}
     navigation.navigate("Player", {
-      id: item.id,
+      id: item?.id,
       type,
       title: titleFor(item),
-      poster_path: item.poster_path,
+      poster_path: item?.poster_path,
     });
   };
 
   const openDetails = (item) => {
-    navigation.navigate("Details", { id: item.id, type: typeFor(item) });
-  };
-
-  const renderContinueWatching = () => {
-    if (!history || history.length === 0) return null;
-
-    return (
-      <View style={styles.sectionContainer}>
-        <View style={styles.sectionHeader}>
-          <Clock color="#FFFFFF" size={18} style={{ marginRight: 8 }} />
-          <Text style={styles.sectionTitle}>Continue Watching</Text>
-        </View>
-
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={history}
-          keyExtractor={(item, index) => `history-${item.id}-${index}`}
-          contentContainerStyle={styles.rowContent}
-          renderItem={({ item }) => {
-            const posterUrl = getImageUrl(item.poster_path, "w500");
-            return (
-              <TouchableOpacity
-                style={styles.historyCard}
-                activeOpacity={0.85}
-                onPress={() =>
-                  navigation.navigate("Player", {
-                    id: item.id,
-                    type: item.type || "movie",
-                    title: item.title,
-                    poster_path: item.poster_path,
-                    season: item.season,
-                    episode: item.episode,
-                  })
-                }
-              >
-                <Image
-                  source={{ uri: posterUrl }}
-                  style={styles.historyPoster}
-                  contentFit="cover"
-                  transition={250}
-                />
-                <BlurView tint="dark" intensity={80} style={styles.historyMeta}>
-                  <Text numberOfLines={1} style={styles.historyTitle}>
-                    {item.title}
-                  </Text>
-                  {item.type === "tv" && item.season && item.episode ? (
-                    <Text style={styles.historySub}>
-                      S{item.season} • E{item.episode}
-                    </Text>
-                  ) : (
-                    <Text style={styles.historySub}>Movie</Text>
-                  )}
-                  <View style={styles.historyPlayIcon}>
-                    <Play color="#000000" size={14} fill="#000000" />
-                  </View>
-                </BlurView>
-              </TouchableOpacity>
-            );
-          }}
-        />
-      </View>
-    );
-  };
-
-  const renderMediaRow = (sectionTitle, icon, data) => {
-    if (!data || data.length === 0) return null;
-
-    return (
-      <View style={styles.sectionContainer}>
-        <View style={styles.sectionHeader}>
-          {icon}
-          <Text style={styles.sectionTitle}>{sectionTitle}</Text>
-        </View>
-
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={data}
-          keyExtractor={(item) => `${typeFor(item)}-${item.id}`}
-          contentContainerStyle={styles.rowContent}
-          renderItem={({ item }) => {
-            const posterUrl = getImageUrl(item.poster_path, "w500");
-            const rating = item.vote_average ? item.vote_average.toFixed(1) : null;
-
-            return (
-              <TouchableOpacity
-                style={styles.posterCard}
-                activeOpacity={0.85}
-                onPress={() => openDetails(item)}
-              >
-                <Image
-                  source={{ uri: posterUrl }}
-                  style={styles.posterImage}
-                  contentFit="cover"
-                  transition={300}
-                />
-                {rating && (
-                  <BlurView tint="dark" intensity={85} style={styles.ratingBadge}>
-                    <Star color="#FFD700" size={11} fill="#FFD700" style={{ marginRight: 3 }} />
-                    <Text style={styles.ratingText}>{rating}</Text>
-                  </BlurView>
-                )}
-                <Text numberOfLines={1} style={styles.cardTitle}>
-                  {titleFor(item)}
-                </Text>
-              </TouchableOpacity>
-            );
-          }}
-        />
-      </View>
-    );
+    navigation.navigate("Details", { id: item?.id, type: typeFor(item) });
   };
 
   const heroBackdropUri = heroItem
-    ? getImageUrl(heroItem.backdrop_path || heroItem.poster_path, "w1280")
+    ? getImageUrl(heroItem?.backdrop_path || heroItem?.poster_path, "original")
     : null;
 
   return (
@@ -235,7 +216,7 @@ export default function HomeScreen({ navigation }) {
         />
       }
     >
-      {/* Hero Spotlight Section */}
+      {/* ═══ Hero Spotlight ═══ */}
       {heroItem && (
         <View style={styles.heroSection}>
           {heroBackdropUri && (
@@ -244,14 +225,16 @@ export default function HomeScreen({ navigation }) {
               style={StyleSheet.absoluteFillObject}
               contentFit="cover"
               priority="high"
-              transition={400}
+              transition={500}
             />
           )}
 
-          {/* OLED Contrast Gradient Vignette */}
-          <View pointerEvents="none" style={styles.heroGradientOverlay} />
+          {/* Multi-layer gradient: vivid top → black bottom */}
+          <View pointerEvents="none" style={styles.heroGradientTop} />
+          <View pointerEvents="none" style={styles.heroGradientMiddle} />
+          <View pointerEvents="none" style={styles.heroGradientBottom} />
 
-          {/* Floating Apple Liquid Glass Hero Card */}
+          {/* Glass Hero Card */}
           <BlurView tint="dark" intensity={85} style={styles.heroGlassCard}>
             <View style={styles.heroBadgeRow}>
               <View style={styles.heroTypePill}>
@@ -260,7 +243,7 @@ export default function HomeScreen({ navigation }) {
                   {typeFor(heroItem) === "tv" ? "TV SERIES" : "FEATURED MOVIE"}
                 </Text>
               </View>
-              {heroItem.vote_average ? (
+              {heroItem?.vote_average ? (
                 <View style={styles.heroRatingPill}>
                   <Star color="#FFD700" size={12} fill="#FFD700" style={{ marginRight: 4 }} />
                   <Text style={styles.heroRatingText}>
@@ -274,7 +257,7 @@ export default function HomeScreen({ navigation }) {
               {titleFor(heroItem)}
             </Text>
 
-            {heroItem.overview ? (
+            {heroItem?.overview ? (
               <Text numberOfLines={2} style={styles.heroOverview}>
                 {heroItem.overview}
               </Text>
@@ -305,7 +288,7 @@ export default function HomeScreen({ navigation }) {
               </TouchableOpacity>
             </View>
 
-            {/* Spotlight Pagination Dots */}
+            {/* Pagination Dots */}
             {heroList.length > 1 && (
               <View style={styles.dotRow}>
                 {heroList.map((_, idx) => (
@@ -324,43 +307,115 @@ export default function HomeScreen({ navigation }) {
         </View>
       )}
 
-      {/* Rows */}
-      {renderContinueWatching()}
+      {/* ═══ Content Rows ═══ */}
+      {history && history.length > 0 && (
+        <View style={styles.sectionContainer}>
+          <View style={styles.sectionHeader}>
+            <Clock color="#FFFFFF" size={18} style={{ marginRight: 8 }} />
+            <Text style={styles.sectionTitle}>Continue Watching</Text>
+          </View>
+          <FlatList
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            data={history}
+            keyExtractor={(item, index) => `history-${item?.id}-${index}`}
+            contentContainerStyle={styles.rowContent}
+            initialNumToRender={4}
+            maxToRenderPerBatch={3}
+            windowSize={5}
+            renderItem={({ item }) => (
+              <HistoryCard
+                item={item}
+                onPress={() =>
+                  navigation.navigate("Player", {
+                    id: item?.id,
+                    type: item?.type || "movie",
+                    title: item?.title,
+                    poster_path: item?.poster_path,
+                    season: item?.season,
+                    episode: item?.episode,
+                  })
+                }
+              />
+            )}
+          />
+        </View>
+      )}
 
       {renderMediaRow(
         "Trending Movies",
         <Flame color="#FF453A" size={20} style={{ marginRight: 8 }} />,
-        trending.filter((item) => typeFor(item) === "movie")
+        trending.filter((item) => typeFor(item) === "movie"),
+        openDetails
       )}
 
       {renderMediaRow(
         "Top Rated Movies",
         <Film color="#0A84FF" size={20} style={{ marginRight: 8 }} />,
-        topMovies
+        topMovies,
+        openDetails
       )}
 
       {renderMediaRow(
         "Trending TV Series",
         <Tv color="#30D158" size={20} style={{ marginRight: 8 }} />,
-        trendingSeries
+        trendingSeries,
+        openDetails
       )}
 
       {renderMediaRow(
         "Top Rated TV Series",
         <Star color="#FFD700" size={20} fill="#FFD700" style={{ marginRight: 8 }} />,
-        topSeries
+        topSeries,
+        openDetails
       )}
 
-      <View style={{ height: 40 }} />
+      <View style={{ height: 80 }} />
     </ScrollView>
   );
 }
+
+// ═══════════════════════════════════════════════════════════
+// Row renderer (extracted outside component to avoid re-creation)
+// ═══════════════════════════════════════════════════════════
+
+function renderMediaRow(sectionTitle, icon, data, openDetails) {
+  if (!data || data.length === 0) return null;
+
+  return (
+    <View style={styles.sectionContainer}>
+      <View style={styles.sectionHeader}>
+        {icon}
+        <Text style={styles.sectionTitle}>{sectionTitle}</Text>
+      </View>
+      <FlatList
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        data={data}
+        keyExtractor={(item) => `${item?.media_type || "item"}-${item?.id}`}
+        contentContainerStyle={styles.rowContent}
+        initialNumToRender={5}
+        maxToRenderPerBatch={3}
+        windowSize={5}
+        renderItem={({ item }) => (
+          <PosterCard item={item} onPress={() => openDetails(item)} />
+        )}
+      />
+    </View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
+// Styles
+// ═══════════════════════════════════════════════════════════
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#000000",
   },
+
+  // ── Hero Section ──
   heroSection: {
     height: height * 0.65,
     justifyContent: "flex-end",
@@ -368,10 +423,31 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
     paddingHorizontal: 16,
     position: "relative",
+    overflow: "hidden",
   },
-  heroGradientOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0, 0, 0, 0.42)",
+  heroGradientTop: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: "30%",
+    backgroundColor: "rgba(0, 0, 0, 0.15)",
+  },
+  heroGradientMiddle: {
+    position: "absolute",
+    top: "30%",
+    left: 0,
+    right: 0,
+    height: "30%",
+    backgroundColor: "rgba(0, 0, 0, 0.30)",
+  },
+  heroGradientBottom: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: "50%",
+    backgroundColor: "rgba(0, 0, 0, 0.75)",
   },
   heroGlassCard: {
     width: "100%",
@@ -484,7 +560,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
   },
 
-  // Section Rows
+  // ── Section Rows ──
   sectionContainer: {
     marginTop: 26,
   },
@@ -506,10 +582,9 @@ const styles = StyleSheet.create({
     gap: 14,
   },
 
-  // Poster Cards
+  // ── Poster Cards ──
   posterCard: {
     width: 135,
-    marginRight: 12,
   },
   posterImage: {
     width: 135,
@@ -544,13 +619,12 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 
-  // Continue Watching Card
+  // ── Continue Watching ──
   historyCard: {
     width: 200,
     height: 120,
     borderRadius: 16,
     overflow: "hidden",
-    marginRight: 12,
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.15)",
     backgroundColor: "#161618",
@@ -558,14 +632,27 @@ const styles = StyleSheet.create({
   historyPoster: {
     ...StyleSheet.absoluteFillObject,
   },
+  historyGradient: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: "60%",
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+  },
   historyMeta: {
     position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
     padding: 10,
-    borderTopWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.12)",
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+  },
+  historyMetaLeft: {
+    flex: 1,
+    marginRight: 8,
   },
   historyTitle: {
     color: "#FFFFFF",
@@ -578,9 +665,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   historyPlayIcon: {
-    position: "absolute",
-    right: 10,
-    bottom: 10,
     width: 26,
     height: 26,
     borderRadius: 13,

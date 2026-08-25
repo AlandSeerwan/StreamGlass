@@ -1,4 +1,5 @@
 import { StatusBar } from "expo-status-bar";
+import * as ScreenOrientation from "expo-screen-orientation";
 import { useVideoPlayer, VideoView } from "expo-video";
 import {
   ArrowLeft,
@@ -12,11 +13,14 @@ import {
   AlertCircle,
   Volume2,
   VolumeX,
-  Sparkles,
+  Lock,
+  Unlock,
 } from "lucide-react-native";
 import { useEffect, useState, useCallback, useRef } from "react";
 import {
   ActivityIndicator,
+  Dimensions,
+  PanResponder,
   Pressable,
   StyleSheet,
   Text,
@@ -24,9 +28,12 @@ import {
   View,
 } from "react-native";
 import { WebView } from "react-native-webview";
-import { BlurView } from "expo-blur";
 import { saveToHistory } from "../services/storage";
 import { extractStream } from "../services/extractor";
+
+const NETFLIX_RED = "#E50914";
+const HUD_BG = "rgba(0, 0, 0, 0.55)";
+const HIDE_DELAY = 4000;
 
 export default function PlayerScreen({ route, navigation }) {
   const {
@@ -44,6 +51,7 @@ export default function PlayerScreen({ route, navigation }) {
 
   const isAnime = type === "anime" || Boolean(paramIsAnime);
 
+  // Stream state
   const [activeStreamUrl, setActiveStreamUrl] = useState(initialStreamUrl || null);
   const [activeHeaders, setActiveHeaders] = useState(initialHeaders || null);
   const [isDirectVideo, setIsDirectVideo] = useState(
@@ -51,19 +59,39 @@ export default function PlayerScreen({ route, navigation }) {
   );
   const [loading, setLoading] = useState(!initialStreamUrl);
   const [statusMessage, setStatusMessage] = useState(
-    initialStreamUrl ? "Starting playback..." : "Connecting to stream provider..."
+    initialStreamUrl ? "Starting playback..." : "Connecting to stream..."
   );
   const [error, setError] = useState(null);
 
-  // Custom HUD States
+  // HUD state
   const [controlsVisible, setControlsVisible] = useState(true);
   const [isPlaying, setIsPlaying] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [contentFit, setContentFit] = useState("contain");
-  const hideControlsTimer = useRef(null);
+  const [controlsLocked, setControlsLocked] = useState(false);
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const [scrubTime, setScrubTime] = useState(0);
 
+  const hideControlsTimer = useRef(null);
+  const progressBarRef = useRef(null);
+  const progressBarWidth = useRef(0);
+
+  // ─── Landscape Lock ──────────────────────────────────────
+  useEffect(() => {
+    ScreenOrientation.lockAsync(
+      ScreenOrientation.OrientationLock.LANDSCAPE
+    ).catch(() => {});
+
+    return () => {
+      ScreenOrientation.lockAsync(
+        ScreenOrientation.OrientationLock.PORTRAIT_UP
+      ).catch(() => {});
+    };
+  }, []);
+
+  // ─── Video Player ────────────────────────────────────────
   const player = useVideoPlayer(
     isDirectVideo && activeStreamUrl
       ? { uri: activeStreamUrl, headers: activeHeaders || {} }
@@ -76,18 +104,29 @@ export default function PlayerScreen({ route, navigation }) {
     }
   );
 
-  // Controls auto-hide timer
+  // ─── HUD Auto-hide ──────────────────────────────────────
   const resetHideTimer = useCallback(() => {
     if (hideControlsTimer.current) {
       clearTimeout(hideControlsTimer.current);
     }
     setControlsVisible(true);
     hideControlsTimer.current = setTimeout(() => {
-      setControlsVisible(false);
-    }, 4000);
+      if (!controlsLocked) {
+        setControlsVisible(false);
+      }
+    }, HIDE_DELAY);
+  }, [controlsLocked]);
+
+  useEffect(() => {
+    return () => {
+      if (hideControlsTimer.current) {
+        clearTimeout(hideControlsTimer.current);
+      }
+    };
   }, []);
 
   const toggleControls = () => {
+    if (controlsLocked) return;
     if (controlsVisible) {
       setControlsVisible(false);
       if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current);
@@ -96,19 +135,19 @@ export default function PlayerScreen({ route, navigation }) {
     }
   };
 
+  // ─── Time Formatting ────────────────────────────────────
   const formatTime = (seconds) => {
-    if (!seconds || isNaN(seconds)) return "00:00";
-    const mins = Math.floor(seconds / 60);
+    if (!seconds || isNaN(seconds)) return "0:00";
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
-    const hours = Math.floor(mins / 60);
-    const remMins = mins % 60;
-    if (hours > 0) {
-      return `${hours}:${remMins < 10 ? "0" : ""}${remMins}:${secs < 10 ? "0" : ""}${secs}`;
+    if (hrs > 0) {
+      return `${hrs}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
     }
-    return `${mins < 10 ? "0" : ""}${mins}:${secs < 10 ? "0" : ""}${secs}`;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  // Video playback action handlers
+  // ─── Player Controls ───────────────────────────────────
   const handlePlayPause = () => {
     resetHideTimer();
     if (!player) return;
@@ -143,13 +182,26 @@ export default function PlayerScreen({ route, navigation }) {
     setContentFit((prev) => (prev === "contain" ? "cover" : "contain"));
   };
 
-  // Video player time & status tracking
+  const handleToggleLock = () => {
+    const nextLocked = !controlsLocked;
+    setControlsLocked(nextLocked);
+    if (nextLocked) {
+      if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current);
+      setControlsVisible(true);
+    } else {
+      resetHideTimer();
+    }
+  };
+
+  // ─── Time Tracking ─────────────────────────────────────
   useEffect(() => {
     if (!player || !isDirectVideo) return;
 
     const interval = setInterval(() => {
-      if (typeof player.currentTime === "number") {
-        setCurrentTime(player.currentTime);
+      if (!isScrubbing) {
+        if (typeof player.currentTime === "number") {
+          setCurrentTime(player.currentTime);
+        }
       }
       if (typeof player.duration === "number" && player.duration > 0) {
         setDuration(player.duration);
@@ -160,8 +212,42 @@ export default function PlayerScreen({ route, navigation }) {
     }, 500);
 
     return () => clearInterval(interval);
-  }, [player, isDirectVideo]);
+  }, [player, isDirectVideo, isScrubbing]);
 
+  // ─── Scrubber PanResponder ─────────────────────────────
+  const scrubberPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => {
+        setIsScrubbing(true);
+        if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current);
+        const locationX = evt.nativeEvent.locationX;
+        const barW = progressBarWidth.current || 1;
+        const ratio = Math.max(0, Math.min(locationX / barW, 1));
+        setScrubTime(ratio * duration);
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        const barW = progressBarWidth.current || 1;
+        const startX = evt.nativeEvent.locationX - gestureState.dx;
+        const currentX = startX + gestureState.dx;
+        const ratio = Math.max(0, Math.min(currentX / barW, 1));
+        setScrubTime(ratio * duration);
+      },
+      onPanResponderRelease: () => {
+        setIsScrubbing(false);
+        if (player && typeof scrubTime === "number") {
+          if (typeof player.currentTime === "number") {
+            player.currentTime = scrubTime;
+          }
+          setCurrentTime(scrubTime);
+        }
+        resetHideTimer();
+      },
+    })
+  ).current;
+
+  // ─── Stream Resolution ─────────────────────────────────
   const resolveStream = useCallback(async () => {
     if (initialStreamUrl) {
       setActiveStreamUrl(initialStreamUrl);
@@ -173,7 +259,7 @@ export default function PlayerScreen({ route, navigation }) {
 
     setLoading(true);
     setError(null);
-    setStatusMessage("Extracting stream for " + title + "...");
+    setStatusMessage("Finding best stream for " + title + "...");
 
     try {
       const result = await extractStream({ id, type, season, episode, audioTrack });
@@ -205,8 +291,8 @@ export default function PlayerScreen({ route, navigation }) {
         resetHideTimer();
       } else {
         const fallbackUrl =
-          type === "anime" || isAnime
-            ? `https://megavid.buzz/ani/${id}/${episode || 1}/${audioTrack || 'sub'}?autoplay=true`
+          isAnime
+            ? `https://megavid.buzz/ani/${id}/${episode || 1}/${audioTrack || "sub"}?autoplay=true`
             : type === "tv"
               ? `https://vixsrc.to/tv/${id}/${season}/${episode}`
               : `https://vixsrc.to/movie/${id}`;
@@ -217,8 +303,8 @@ export default function PlayerScreen({ route, navigation }) {
       }
     } catch {
       const fallbackUrl =
-        type === "anime" || isAnime
-          ? `https://megavid.buzz/ani/${id}/${episode || 1}/${audioTrack || 'sub'}?autoplay=true`
+        isAnime
+          ? `https://megavid.buzz/ani/${id}/${episode || 1}/${audioTrack || "sub"}?autoplay=true`
           : type === "tv"
             ? `https://vixsrc.to/tv/${id}/${season}/${episode}`
             : `https://vixsrc.to/movie/${id}`;
@@ -244,8 +330,18 @@ export default function PlayerScreen({ route, navigation }) {
     }).catch(() => {});
   }, [id, type, season, episode, isAnime, title, poster_path]);
 
-  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+  // ─── Computed Values ───────────────────────────────────
+  const displayTime = isScrubbing ? scrubTime : currentTime;
+  const progressPercent = duration > 0 ? (displayTime / duration) * 100 : 0;
 
+  const episodeLabel =
+    isAnime
+      ? `E${episode}`
+      : type === "tv"
+        ? `S${season}:E${episode}`
+        : null;
+
+  // ─── Render ────────────────────────────────────────────
   return (
     <View style={styles.container}>
       <StatusBar hidden style="light" />
@@ -259,7 +355,6 @@ export default function PlayerScreen({ route, navigation }) {
                 style={styles.video}
                 nativeControls={false}
                 contentFit={contentFit}
-                fullscreenOptions={{ enable: true }}
                 allowsPictureInPicture
                 surfaceType="surfaceView"
               />
@@ -272,8 +367,8 @@ export default function PlayerScreen({ route, navigation }) {
                       <head>
                         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
                         <style>
-                          * { margin: 0; padding: 0; box-sizing: border-box; background: #000000; }
-                          html, body { width: 100%; height: 100%; overflow: hidden; background: #000000; }
+                          * { margin: 0; padding: 0; box-sizing: border-box; background: #000; }
+                          html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
                           iframe { width: 100%; height: 100%; border: 0; position: absolute; top: 0; left: 0; }
                         </style>
                       </head>
@@ -319,443 +414,438 @@ export default function PlayerScreen({ route, navigation }) {
               />
             )}
 
-            {/* Custom Apple Liquid Glass Cinema HUD */}
+            {/* ═══ Netflix HUD Overlay ═══ */}
             {controlsVisible && (
               <View style={styles.hudOverlay} pointerEvents="box-none">
-                {/* Top Liquid Glass Island */}
+
+                {/* ── Top Bar ── */}
                 <View style={styles.topBar}>
                   <Pressable
                     accessibilityLabel="Go back"
-                    hitSlop={12}
+                    hitSlop={14}
                     onPress={() => navigation.goBack()}
-                    style={styles.glassCircleButton}
+                    style={styles.topBarBtn}
                   >
-                    <ArrowLeft color="#FFFFFF" size={20} />
+                    <ArrowLeft color="#FFFFFF" size={22} />
                   </Pressable>
 
-                  <BlurView tint="dark" intensity={85} style={styles.titleGlassPill}>
+                  <View style={styles.titleContainer}>
                     <Text numberOfLines={1} style={styles.titleText}>
                       {title}
                     </Text>
-                    {type === "tv" && (
-                      <View style={styles.episodeTag}>
-                        <Text style={styles.episodeTagText}>
-                          S{season} E{episode}
-                        </Text>
-                      </View>
+                    {episodeLabel && (
+                      <Text style={styles.episodeLabel}> · {episodeLabel}</Text>
                     )}
-                  </BlurView>
+                  </View>
 
-                  <View style={styles.topRightActions}>
-                    <Pressable
-                      accessibilityLabel="Toggle Fit"
-                      hitSlop={8}
-                      onPress={handleToggleFit}
-                      style={styles.glassCircleButton}
-                    >
-                      {contentFit === "contain" ? (
-                        <Maximize2 color="#FFFFFF" size={18} />
-                      ) : (
-                        <Minimize2 color="#FFFFFF" size={18} />
-                      )}
-                    </Pressable>
+                  <View style={styles.topBarRight}>
+                    {isDirectVideo && (
+                      <Pressable
+                        accessibilityLabel="Toggle mute"
+                        hitSlop={10}
+                        onPress={handleToggleMute}
+                        style={styles.topBarBtn}
+                      >
+                        {isMuted ? (
+                          <VolumeX color="#FFFFFF" size={20} />
+                        ) : (
+                          <Volume2 color="#FFFFFF" size={20} />
+                        )}
+                      </Pressable>
+                    )}
+                    {isDirectVideo && (
+                      <Pressable
+                        accessibilityLabel="Toggle aspect"
+                        hitSlop={10}
+                        onPress={handleToggleFit}
+                        style={styles.topBarBtn}
+                      >
+                        {contentFit === "contain" ? (
+                          <Maximize2 color="#FFFFFF" size={20} />
+                        ) : (
+                          <Minimize2 color="#FFFFFF" size={20} />
+                        )}
+                      </Pressable>
+                    )}
                   </View>
                 </View>
 
-                {/* Center Cinema Controls for Direct Video */}
+                {/* ── Center Play Controls (direct video only) ── */}
                 {isDirectVideo && (
                   <View style={styles.centerControls} pointerEvents="box-none">
                     <Pressable
                       accessibilityLabel="Rewind 10 seconds"
-                      hitSlop={12}
+                      hitSlop={16}
                       onPress={() => handleSeekBy(-10)}
-                      style={styles.glassSeekButton}
+                      style={({ pressed }) => [
+                        styles.seekButton,
+                        pressed && styles.seekButtonPressed,
+                      ]}
                     >
-                      <RotateCcw color="#FFFFFF" size={24} />
-                      <Text style={styles.seekBadge}>10</Text>
+                      <RotateCcw color="#FFFFFF" size={28} />
+                      <Text style={styles.seekLabel}>10</Text>
                     </Pressable>
 
                     <Pressable
                       accessibilityLabel={isPlaying ? "Pause" : "Play"}
-                      hitSlop={16}
+                      hitSlop={20}
                       onPress={handlePlayPause}
-                      style={styles.heroPlayButton}
+                      style={({ pressed }) => [
+                        styles.playPauseButton,
+                        pressed && styles.playPausePressed,
+                      ]}
                     >
-                      <BlurView tint="dark" intensity={95} style={styles.heroPlayBlur}>
-                        {isPlaying ? (
-                          <Pause color="#FFFFFF" size={32} />
-                        ) : (
-                          <Play color="#FFFFFF" size={32} style={{ marginLeft: 4 }} />
-                        )}
-                      </BlurView>
+                      {isPlaying ? (
+                        <Pause color="#FFFFFF" size={36} fill="#FFFFFF" />
+                      ) : (
+                        <Play color="#FFFFFF" size={36} fill="#FFFFFF" style={{ marginLeft: 3 }} />
+                      )}
                     </Pressable>
 
                     <Pressable
                       accessibilityLabel="Forward 10 seconds"
-                      hitSlop={12}
+                      hitSlop={16}
                       onPress={() => handleSeekBy(10)}
-                      style={styles.glassSeekButton}
+                      style={({ pressed }) => [
+                        styles.seekButton,
+                        pressed && styles.seekButtonPressed,
+                      ]}
                     >
-                      <RotateCw color="#FFFFFF" size={24} />
-                      <Text style={styles.seekBadge}>10</Text>
+                      <RotateCw color="#FFFFFF" size={28} />
+                      <Text style={styles.seekLabel}>10</Text>
                     </Pressable>
                   </View>
                 )}
 
-                {/* Bottom Liquid Glass Scrubber Dock */}
+                {/* ── Bottom: Scrubber + Utility Row (direct video only) ── */}
                 {isDirectVideo && (
-                  <View style={styles.bottomDockContainer}>
-                    <BlurView tint="dark" intensity={88} style={styles.bottomGlassDock}>
-                      <Pressable
-                        accessibilityLabel="Mute toggle"
-                        hitSlop={8}
-                        onPress={handleToggleMute}
-                        style={styles.dockIconButton}
+                  <View style={styles.bottomSection}>
+                    {/* Progress / Scrubber */}
+                    <View style={styles.progressRow}>
+                      <Text style={styles.timeText}>{formatTime(displayTime)}</Text>
+
+                      <View
+                        style={styles.progressBarContainer}
+                        onLayout={(e) => {
+                          progressBarWidth.current = e.nativeEvent.layout.width;
+                        }}
+                        {...scrubberPanResponder.panHandlers}
                       >
-                        {isMuted ? (
-                          <VolumeX color="#FFFFFF" size={18} />
-                        ) : (
-                          <Volume2 color="#FFFFFF" size={18} />
-                        )}
-                      </Pressable>
-
-                      <Text style={styles.timeLabel}>{formatTime(currentTime)}</Text>
-
-                      {/* Progress Bar */}
-                      <View style={styles.progressBarTrack}>
+                        <View style={styles.progressTrack}>
+                          <View
+                            style={[
+                              styles.progressFill,
+                              { width: `${Math.min(Math.max(progressPercent, 0), 100)}%` },
+                            ]}
+                          />
+                        </View>
+                        {/* Scrub Thumb */}
                         <View
                           style={[
-                            styles.progressBarFill,
-                            { width: `${Math.min(Math.max(progressPercent, 0), 100)}%` },
+                            styles.scrubThumb,
+                            {
+                              left: `${Math.min(Math.max(progressPercent, 0), 100)}%`,
+                            },
                           ]}
                         />
-                        <View style={styles.progressGlowHead} />
                       </View>
 
-                      <Text style={styles.timeLabel}>
+                      <Text style={styles.timeText}>
                         {duration > 0 ? formatTime(duration) : "--:--"}
                       </Text>
+                    </View>
 
-                      <View style={styles.oledQualityBadge}>
-                        <Sparkles color="#FFFFFF" size={12} style={{ marginRight: 4 }} />
-                        <Text style={styles.oledQualityText}>OLED</Text>
-                      </View>
-                    </BlurView>
+                    {/* Utility Row */}
+                    <View style={styles.utilityRow}>
+                      <Pressable
+                        accessibilityLabel="Lock controls"
+                        hitSlop={10}
+                        onPress={handleToggleLock}
+                        style={styles.utilityBtn}
+                      >
+                        {controlsLocked ? (
+                          <Lock color="#FFFFFF" size={18} />
+                        ) : (
+                          <Unlock color="#8E8E93" size={18} />
+                        )}
+                        <Text style={[styles.utilityLabel, controlsLocked && { color: "#FFFFFF" }]}>
+                          {controlsLocked ? "Locked" : "Lock"}
+                        </Text>
+                      </Pressable>
+                    </View>
                   </View>
+                )}
+
+                {/* Embed-only: just back button in top bar */}
+                {!isDirectVideo && (
+                  <View style={{ flex: 1 }} />
                 )}
               </View>
             )}
           </View>
         </TouchableWithoutFeedback>
       ) : loading ? (
-        <View style={styles.centerContainer}>
+        /* ── Loading State ── */
+        <View style={styles.stateContainer}>
           <Pressable
             accessibilityLabel="Go back"
             hitSlop={12}
             onPress={() => navigation.goBack()}
-            style={styles.backButtonTop}
+            style={styles.stateBackBtn}
           >
-            <ArrowLeft color="#fff" size={20} />
+            <ArrowLeft color="#FFFFFF" size={20} />
           </Pressable>
 
-          <BlurView tint="dark" intensity={88} style={styles.glassCard}>
-            <ActivityIndicator size="large" color="#FFFFFF" />
-            <Text style={styles.loadingTitle}>StreamGlass Cinema</Text>
-            <Text style={styles.loadingSubtitle}>{title}</Text>
-            {type === "tv" && (
-              <View style={styles.episodePill}>
-                <Text style={styles.episodePillText}>
-                  Season {season} • Episode {episode}
-                </Text>
-              </View>
+          <View style={styles.stateCard}>
+            <ActivityIndicator size="large" color={NETFLIX_RED} />
+            <Text style={styles.stateTitle}>{title}</Text>
+            {episodeLabel && (
+              <Text style={styles.stateEpisode}>{episodeLabel}</Text>
             )}
-            <Text style={styles.statusText}>{statusMessage}</Text>
-          </BlurView>
+            <Text style={styles.stateMessage}>{statusMessage}</Text>
+          </View>
         </View>
       ) : (
-        <View style={styles.centerContainer}>
+        /* ── Error State ── */
+        <View style={styles.stateContainer}>
           <Pressable
             accessibilityLabel="Go back"
             hitSlop={12}
             onPress={() => navigation.goBack()}
-            style={styles.backButtonTop}
+            style={styles.stateBackBtn}
           >
-            <ArrowLeft color="#fff" size={20} />
+            <ArrowLeft color="#FFFFFF" size={20} />
           </Pressable>
 
-          <BlurView tint="dark" intensity={88} style={styles.glassCard}>
-            <AlertCircle color="#FF453A" size={42} style={{ marginBottom: 12 }} />
-            <Text style={styles.errorTitle}>Stream Unavailable</Text>
-            <Text style={styles.errorMessage}>{error}</Text>
+          <View style={styles.stateCard}>
+            <AlertCircle color={NETFLIX_RED} size={48} style={{ marginBottom: 16 }} />
+            <Text style={styles.stateTitle}>Stream Unavailable</Text>
+            <Text style={styles.stateMessage}>{error || "Could not connect to the stream provider."}</Text>
 
             <Pressable
               style={styles.retryButton}
               onPress={resolveStream}
-              android_ripple={{ color: "rgba(0,0,0,0.15)" }}
             >
-              <RefreshCw color="#000000" size={18} style={{ marginRight: 8 }} />
-              <Text style={styles.retryText}>Retry Playback</Text>
+              <RefreshCw color="#FFFFFF" size={16} style={{ marginRight: 8 }} />
+              <Text style={styles.retryText}>Retry</Text>
             </Pressable>
-          </BlurView>
+          </View>
         </View>
       )}
     </View>
   );
 }
 
+// ═══════════════════════════════════════════════════════════
+// Netflix-Style Stylesheet
+// ═══════════════════════════════════════════════════════════
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000000" },
   videoFrame: { flex: 1, backgroundColor: "#000000" },
   video: { flex: 1, backgroundColor: "#000000" },
   webview: { flex: 1, backgroundColor: "#000000" },
 
-  // HUD Overlay
+  // ── HUD Overlay ──
   hudOverlay: {
     ...StyleSheet.absoluteFillObject,
+    backgroundColor: HUD_BG,
     justifyContent: "space-between",
-    padding: 16,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 16,
     zIndex: 999,
   },
 
-  // Top Bar & Island
+  // ── Top Bar ──
   topBar: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 12,
-    gap: 12,
   },
-  glassCircleButton: {
+  topBarBtn: {
     width: 44,
     height: 44,
-    borderRadius: 22,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.18)",
   },
-  titleGlassPill: {
+  titleContainer: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 100,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.16)",
-    overflow: "hidden",
+    paddingHorizontal: 8,
   },
   titleText: {
     color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
+    flexShrink: 1,
+  },
+  episodeLabel: {
+    color: "#8E8E93",
     fontSize: 15,
-    fontWeight: "700",
-    letterSpacing: 0.3,
+    fontWeight: "600",
   },
-  episodeTag: {
-    backgroundColor: "rgba(255, 255, 255, 0.15)",
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 100,
-    marginLeft: 8,
-  },
-  episodeTagText: {
-    color: "#FFFFFF",
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  topRightActions: {
+  topBarRight: {
     flexDirection: "row",
     alignItems: "center",
   },
 
-  // Center Controls
+  // ── Center Controls ──
   centerControls: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 36,
+    gap: 48,
   },
-  glassSeekButton: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+  seekButton: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.45)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.16)",
+    opacity: 0.9,
   },
-  seekBadge: {
+  seekButtonPressed: {
+    opacity: 0.5,
+  },
+  seekLabel: {
     position: "absolute",
-    bottom: 8,
-    color: "#FFFFFF",
-    fontSize: 9,
-    fontWeight: "800",
-  },
-  heroPlayButton: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    overflow: "hidden",
-    shadowColor: "#FFFFFF",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    elevation: 8,
-  },
-  heroPlayBlur: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 38,
-    borderWidth: 1.5,
-    borderColor: "rgba(255, 255, 255, 0.28)",
-  },
-
-  // Bottom Liquid Glass Dock
-  bottomDockContainer: {
-    marginBottom: 8,
-    alignItems: "center",
-  },
-  bottomGlassDock: {
-    width: "100%",
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.16)",
-    overflow: "hidden",
-    gap: 12,
-  },
-  dockIconButton: {
-    padding: 4,
-  },
-  timeLabel: {
-    color: "#8E8E93",
-    fontSize: 12,
-    fontWeight: "600",
-    fontVariant: ["tabular-nums"],
-    minWidth: 44,
-    textAlign: "center",
-  },
-  progressBarTrack: {
-    flex: 1,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "rgba(255, 255, 255, 0.18)",
-    overflow: "hidden",
-    justifyContent: "center",
-  },
-  progressBarFill: {
-    height: "100%",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 3,
-  },
-  progressGlowHead: {
-    position: "absolute",
-    right: 0,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#FFFFFF",
-  },
-  oledQualityBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.12)",
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 100,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.18)",
-  },
-  oledQualityText: {
+    bottom: 6,
     color: "#FFFFFF",
     fontSize: 10,
     fontWeight: "800",
-    letterSpacing: 0.5,
+  },
+  playPauseButton: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    borderWidth: 2,
+    borderColor: "rgba(255, 255, 255, 0.25)",
+  },
+  playPausePressed: {
+    opacity: 0.6,
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
   },
 
-  // Loading & Error States
-  centerContainer: {
+  // ── Bottom Section ──
+  bottomSection: {
+    gap: 8,
+  },
+  progressRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  timeText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "600",
+    fontVariant: ["tabular-nums"],
+    minWidth: 48,
+  },
+  progressBarContainer: {
+    flex: 1,
+    height: 36,
+    justifyContent: "center",
+    position: "relative",
+  },
+  progressTrack: {
+    width: "100%",
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    overflow: "hidden",
+  },
+  progressFill: {
+    height: "100%",
+    backgroundColor: NETFLIX_RED,
+    borderRadius: 2,
+  },
+  scrubThumb: {
+    position: "absolute",
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: NETFLIX_RED,
+    marginLeft: -7,
+    top: 11,
+    shadowColor: NETFLIX_RED,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+
+  // ── Utility Row ──
+  utilityRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    paddingLeft: 4,
+  },
+  utilityBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  utilityLabel: {
+    color: "#8E8E93",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+
+  // ── Loading & Error States ──
+  stateContainer: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     padding: 24,
     backgroundColor: "#000000",
   },
-  backButtonTop: {
+  stateBackBtn: {
     position: "absolute",
-    top: 24,
+    top: 16,
     left: 16,
     width: 44,
     height: 44,
     borderRadius: 22,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.18)",
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
     zIndex: 999,
   },
-  glassCard: {
+  stateCard: {
     width: "100%",
-    maxWidth: 360,
-    padding: 28,
-    borderRadius: 24,
+    maxWidth: 380,
+    padding: 32,
+    borderRadius: 16,
     alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.18)",
-    overflow: "hidden",
+    borderColor: "rgba(255, 255, 255, 0.1)",
   },
-  loadingTitle: {
+  stateTitle: {
     color: "#FFFFFF",
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: "700",
-    marginTop: 18,
-    textAlign: "center",
-  },
-  loadingSubtitle: {
-    color: "#8E8E93",
-    fontSize: 15,
-    marginTop: 4,
-    textAlign: "center",
-  },
-  episodePill: {
-    backgroundColor: "rgba(255, 255, 255, 0.12)",
-    paddingVertical: 4,
-    paddingHorizontal: 12,
-    borderRadius: 100,
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.16)",
-  },
-  episodePillText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  statusText: {
-    color: "#8E8E93",
-    fontSize: 13,
     marginTop: 16,
     textAlign: "center",
-    lineHeight: 18,
   },
-  errorTitle: {
-    color: "#FFFFFF",
-    fontSize: 19,
-    fontWeight: "700",
-    textAlign: "center",
-  },
-  errorMessage: {
+  stateEpisode: {
     color: "#8E8E93",
     fontSize: 14,
-    marginTop: 8,
+    fontWeight: "600",
+    marginTop: 4,
+  },
+  stateMessage: {
+    color: "#8E8E93",
+    fontSize: 14,
+    marginTop: 12,
     textAlign: "center",
     lineHeight: 20,
   },
@@ -763,14 +853,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#FFFFFF",
+    backgroundColor: NETFLIX_RED,
     marginTop: 20,
     paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 100,
+    paddingHorizontal: 28,
+    borderRadius: 6,
   },
   retryText: {
-    color: "#000000",
+    color: "#FFFFFF",
     fontSize: 15,
     fontWeight: "700",
   },

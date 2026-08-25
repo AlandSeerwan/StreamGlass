@@ -117,6 +117,10 @@ export default function MoviesScreen({ navigation }) {
         columnWrapperStyle={styles.gridRow}
         onEndReached={loadMore}
         onEndReachedThreshold={0.5}
+        initialNumToRender={9}
+        maxToRenderPerBatch={6}
+        windowSize={7}
+        removeClippedSubviews
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -140,10 +144,10 @@ export default function MoviesScreen({ navigation }) {
                 contentFit="cover"
                 transition={250}
               />
-              {item.vote_average ? (
+              {item?.vote_average ? (
                 <BlurView tint="dark" intensity={80} style={styles.ratingBadge}>
                   <Star color="#FFD700" size={10} fill="#FFD700" style={{ marginRight: 3 }} />
-                  <Text style={styles.ratingText}>{item.vote_average.toFixed(1)}</Text>
+                  <Text style={styles.ratingText}>{item.vote_average?.toFixed(1)}</Text>
                 </BlurView>
               ) : null}
               <Text numberOfLines={1} style={styles.cardTitle}>

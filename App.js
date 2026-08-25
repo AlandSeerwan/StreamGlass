@@ -100,9 +100,21 @@ export default function App() {
         screenOptions={{ headerShown: false, animation: "fade" }}
       >
         <Stack.Screen name="MainTabs" component={MainTabs} />
-        <Stack.Screen name="Player" component={PlayerScreen} />
-        <Stack.Screen name="Details" component={DetailScreen} />
-        <Stack.Screen name="Watchlist" component={WatchlistScreen} />
+        <Stack.Screen
+          name="Player"
+          component={PlayerScreen}
+          options={{ animation: "fade", gestureEnabled: false }}
+        />
+        <Stack.Screen
+          name="Details"
+          component={DetailScreen}
+          options={{ animation: "slide_from_right", gestureEnabled: true }}
+        />
+        <Stack.Screen
+          name="Watchlist"
+          component={WatchlistScreen}
+          options={{ animation: "slide_from_right", gestureEnabled: true }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );

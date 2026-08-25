@@ -72,6 +72,10 @@ export default function AnimeScreen({ navigation }) {
         columnWrapperStyle={styles.gridRow}
         onEndReached={loadMore}
         onEndReachedThreshold={0.5}
+        initialNumToRender={9}
+        maxToRenderPerBatch={6}
+        windowSize={7}
+        removeClippedSubviews
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
