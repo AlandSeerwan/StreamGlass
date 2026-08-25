@@ -266,14 +266,32 @@ export default function PlayerScreen({ route, navigation }) {
             ) : (
               <WebView
                 source={{
-                  uri: activeStreamUrl,
-                  headers: activeHeaders || {
-                    Referer: "https://miruro.tv/",
-                    "User-Agent":
-                      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                  },
+                  html: `
+                    <!DOCTYPE html>
+                    <html>
+                      <head>
+                        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+                        <style>
+                          * { margin: 0; padding: 0; box-sizing: border-box; background: #000000; }
+                          html, body { width: 100%; height: 100%; overflow: hidden; background: #000000; }
+                          iframe { width: 100%; height: 100%; border: 0; position: absolute; top: 0; left: 0; }
+                        </style>
+                      </head>
+                      <body>
+                        <iframe
+                          src="${activeStreamUrl}"
+                          allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+                          allowfullscreen="true"
+                          webkitallowfullscreen="true"
+                          mozallowfullscreen="true"
+                        ></iframe>
+                      </body>
+                    </html>
+                  `,
+                  baseUrl: isAnime ? "https://miruro.tv" : "https://vixsrc.to",
                 }}
                 style={styles.webview}
+                originWhitelist={["*"]}
                 allowsFullscreenVideo
                 javaScriptEnabled
                 domStorageEnabled
