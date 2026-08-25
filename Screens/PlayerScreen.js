@@ -201,9 +201,11 @@ export default function PlayerScreen({ route, navigation }) {
         resetHideTimer();
       } else {
         const fallbackUrl =
-          type === "tv"
-            ? `https://vixsrc.to/tv/${id}/${season}/${episode}`
-            : `https://vixsrc.to/movie/${id}`;
+          type === "anime" || isAnime
+            ? `https://autoembed.cc/embed/anime/${id}/${episode || 1}`
+            : type === "tv"
+              ? `https://vixsrc.to/tv/${id}/${season}/${episode}`
+              : `https://vixsrc.to/movie/${id}`;
 
         setActiveStreamUrl(fallbackUrl);
         setIsDirectVideo(false);
@@ -211,15 +213,17 @@ export default function PlayerScreen({ route, navigation }) {
       }
     } catch {
       const fallbackUrl =
-        type === "tv"
-          ? `https://vixsrc.to/tv/${id}/${season}/${episode}`
-          : `https://vixsrc.to/movie/${id}`;
+        type === "anime" || isAnime
+          ? `https://autoembed.cc/embed/anime/${id}/${episode || 1}`
+          : type === "tv"
+            ? `https://vixsrc.to/tv/${id}/${season}/${episode}`
+            : `https://vixsrc.to/movie/${id}`;
 
       setActiveStreamUrl(fallbackUrl);
       setIsDirectVideo(false);
       setLoading(false);
     }
-  }, [id, type, season, episode, title, initialStreamUrl, initialHeaders, player, resetHideTimer]);
+  }, [id, type, season, episode, isAnime, title, initialStreamUrl, initialHeaders, player, resetHideTimer]);
 
   useEffect(() => {
     resolveStream();
@@ -277,6 +281,10 @@ export default function PlayerScreen({ route, navigation }) {
                   return (
                     request.url.includes("vixsrc") ||
                     request.url.includes("vidsrc") ||
+                    request.url.includes("autoembed") ||
+                    request.url.includes("smashy") ||
+                    request.url.includes("2embed") ||
+                    request.url.includes("anime") ||
                     request.url.includes("m3u8") ||
                     request.url.includes("stream") ||
                     request.url.startsWith("about:") ||

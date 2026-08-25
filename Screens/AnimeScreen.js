@@ -2,7 +2,6 @@ import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
 import { useEffect, useState, useCallback } from "react";
 import {
-  ActivityIndicator,
   FlatList,
   RefreshControl,
   StyleSheet,
@@ -11,19 +10,18 @@ import {
   View,
 } from "react-native";
 import { Sparkles, Star } from "lucide-react-native";
-import { getTrendingAnime, findMediaByTitle } from "../services/api";
+import { getTrendingAnime } from "../services/api";
 
 export default function AnimeScreen({ navigation }) {
   const [animeList, setAnimeList] = useState([]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [resolvingId, setResolvingId] = useState(null);
 
   const fetchAnime = useCallback(async (pageNum = 1, append = false) => {
     setLoading(true);
     try {
-      const results = await getTrendingAnime(pageNum, 21);
+      const results = await getTrendingAnime(pageNum, 24);
       setAnimeList((prev) => (append ? [...prev, ...results] : results));
     } catch {
       // fallback
@@ -52,37 +50,6 @@ export default function AnimeScreen({ navigation }) {
     }
   };
 
-  const handleAnimePress = async (item) => {
-    const searchTitle =
-      item.title?.english || item.title?.romaji || item.title?.native;
-
-    if (!searchTitle) return;
-
-    setResolvingId(item.id);
-    try {
-      // Find matching TMDB item for seamless streaming & episode metadata
-      const tmdbMatch = await findMediaByTitle(searchTitle);
-
-      if (tmdbMatch && tmdbMatch.id) {
-        navigation.navigate("Details", {
-          id: tmdbMatch.id,
-          type: tmdbMatch.media_type || "tv",
-        });
-      } else {
-        // Fallback to SearchTab
-        navigation.navigate("SearchTab", {
-          initialQuery: searchTitle,
-        });
-      }
-    } catch {
-      navigation.navigate("SearchTab", {
-        initialQuery: searchTitle,
-      });
-    } finally {
-      setResolvingId(null);
-    }
-  };
-
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -92,7 +59,7 @@ export default function AnimeScreen({ navigation }) {
           <Text style={styles.headerTitle}>Anime</Text>
         </View>
         <Text style={styles.headerSubtitle}>
-          Trending Japanese animation via AniList & TMDB
+          Trending Japanese animation via AniList
         </Text>
       </View>
 
@@ -118,14 +85,18 @@ export default function AnimeScreen({ navigation }) {
           const coverUrl =
             item.coverImage?.extraLarge || item.coverImage?.large;
           const score = item.averageScore ? (item.averageScore / 10).toFixed(1) : null;
-          const isResolving = resolvingId === item.id;
 
           return (
             <TouchableOpacity
               style={styles.card}
               activeOpacity={0.85}
-              disabled={isResolving}
-              onPress={() => handleAnimePress(item)}
+              onPress={() => {
+                navigation.navigate("Details", {
+                  id: item.id,
+                  type: "anime",
+                  item,
+                });
+              }}
             >
               <Image
                 source={{ uri: coverUrl }}
@@ -133,12 +104,6 @@ export default function AnimeScreen({ navigation }) {
                 contentFit="cover"
                 transition={250}
               />
-
-              {isResolving ? (
-                <View style={styles.resolvingOverlay}>
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                </View>
-              ) : null}
 
               {score ? (
                 <BlurView tint="dark" intensity={80} style={styles.ratingBadge}>
@@ -201,13 +166,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#161618",
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.1)",
-  },
-  resolvingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: 14,
-    backgroundColor: "rgba(0, 0, 0, 0.65)",
-    alignItems: "center",
-    justifyContent: "center",
   },
   ratingBadge: {
     position: "absolute",

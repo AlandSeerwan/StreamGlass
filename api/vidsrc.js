@@ -27,6 +27,23 @@ export default async function handler(req, res) {
   }
 
   try {
+    if (type === "anime") {
+      return res.status(200).json({
+        provider: "autoembed-anime",
+        sources: [
+          {
+            url: `https://autoembed.cc/embed/anime/${id}/${episode}`,
+            quality: "auto",
+            isM3U8: false,
+          },
+        ],
+        headers: {
+          Referer: "https://autoembed.cc/",
+        },
+        subtitles: [],
+      });
+    }
+
     const providers = [
       {
         name: "vixsrc",

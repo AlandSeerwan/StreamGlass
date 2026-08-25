@@ -157,4 +157,54 @@ export async function getTrendingAnime(page = 1, perPage = 20) {
   }
 }
 
+/**
+ * Fetch detailed Anime info by AniList ID
+ */
+export async function getAnimeDetails(id) {
+  const query = `
+    query ($id: Int) {
+      Media(id: $id, type: ANIME) {
+        id
+        title {
+          romaji
+          english
+          native
+        }
+        coverImage {
+          extraLarge
+          large
+        }
+        bannerImage
+        description
+        episodes
+        status
+        genres
+        averageScore
+        seasonYear
+      }
+    }
+  `;
+
+  try {
+    const res = await fetch(ANILIST_GRAPHQL_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        query,
+        variables: { id: Number(id) },
+      }),
+    });
+
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.data?.Media || null;
+  } catch {
+    return null;
+  }
+}
+
 export { extractStream, getExtractorBaseUrl, setExtractorBaseUrl } from "./extractor";
+

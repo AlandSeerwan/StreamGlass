@@ -24,8 +24,9 @@ import {
   Layers,
   X,
   ChevronDown,
+  Sparkles,
 } from "lucide-react-native";
-import { getDetails, getSeason, getImageUrl } from "../services/api";
+import { getDetails, getSeason, getAnimeDetails, getImageUrl } from "../services/api";
 import {
   checkIsInWatchlist,
   saveToHistory,
@@ -35,64 +36,105 @@ import {
 const { width, height } = Dimensions.get("window");
 
 export default function DetailScreen({ route, navigation }) {
-  const { id, type = "movie" } = route.params;
-  const [item, setItem] = useState(null);
+  const { id, type = "movie", item: initialItem } = route.params;
+  const [item, setItem] = useState(initialItem || null);
   const [saved, setSaved] = useState(false);
   const [season, setSeason] = useState(1);
   const [episodes, setEpisodes] = useState([]);
   const [seasonModalVisible, setSeasonModalVisible] = useState(false);
+  const [audioTrack, setAudioTrack] = useState("sub"); // 'sub' or 'dub'
+
+  const isAnime = type === "anime";
 
   useEffect(() => {
-    getDetails(id, type)
-      .then((data) => {
-        setItem(data);
-        checkIsInWatchlist(id, type).then(setSaved);
-        if (type === "tv") {
-          getSeason(id, 1)
-            .then((sData) => setEpisodes(sData.episodes || []))
-            .catch(() => setEpisodes([]));
-        }
-      })
-      .catch(() => {});
-  }, [id, type]);
+    if (isAnime) {
+      getAnimeDetails(id)
+        .then((animeData) => {
+          if (animeData) {
+            setItem(animeData);
+            const totalEps = animeData.episodes || 12;
+            const generatedEps = Array.from({ length: totalEps }, (_, i) => ({
+              id: i + 1,
+              episode_number: i + 1,
+              name: `Episode ${i + 1}`,
+            }));
+            setEpisodes(generatedEps);
+          }
+        })
+        .catch(() => {});
+      checkIsInWatchlist(id, "anime").then(setSaved);
+    } else {
+      getDetails(id, type)
+        .then((data) => {
+          setItem(data);
+          checkIsInWatchlist(id, type).then(setSaved);
+          if (type === "tv") {
+            getSeason(id, 1)
+              .then((sData) => setEpisodes(sData.episodes || []))
+              .catch(() => setEpisodes([]));
+          }
+        })
+        .catch(() => {});
+    }
+  }, [id, type, isAnime]);
 
   if (!item) {
     return (
       <View style={styles.loadingContainer}>
         <BlurView tint="dark" intensity={85} style={styles.loadingCard}>
-          <Text style={styles.loadingText}>Loading Title...</Text>
+          <Text style={styles.loadingText}>Loading Details...</Text>
         </BlurView>
       </View>
     );
   }
 
-  const title = item.title || item.name || "Untitled";
-  const releaseYear = (item.release_date || item.first_air_date || "").slice(0, 4);
-  const backdropUrl = getImageUrl(item.backdrop_path || item.poster_path, "w1280");
-  const posterUrl = getImageUrl(item.poster_path, "w500");
-  const castList = item.credits?.cast?.slice(0, 15) || [];
-  const recommendations =
-    item.recommendations?.results?.slice(0, 10) ||
-    item.similar?.results?.slice(0, 10) ||
-    [];
+  const title = isAnime
+    ? item.title?.english || item.title?.romaji || item.title?.native || "Anime"
+    : item.title || item.name || "Untitled";
+
+  const releaseYear = isAnime
+    ? String(item.seasonYear || "")
+    : (item.release_date || item.first_air_date || "").slice(0, 4);
+
+  const backdropUrl = isAnime
+    ? item.bannerImage || item.coverImage?.extraLarge || item.coverImage?.large
+    : getImageUrl(item.backdrop_path || item.poster_path, "w1280");
+
+  const posterPath = isAnime
+    ? item.coverImage?.extraLarge || item.coverImage?.large
+    : item.poster_path;
+
+  const score = isAnime
+    ? item.averageScore ? (item.averageScore / 10).toFixed(1) : null
+    : item.vote_average ? item.vote_average.toFixed(1) : null;
+
+  const castList = !isAnime ? item.credits?.cast?.slice(0, 15) || [] : [];
+  const recommendations = !isAnime
+    ? item.recommendations?.results?.slice(0, 10) ||
+      item.similar?.results?.slice(0, 10) ||
+      []
+    : [];
 
   const play = async (episodeNum) => {
+    const epToPlay = episodeNum || 1;
     await saveToHistory({
       id,
       type,
       title,
-      poster_path: item.poster_path,
+      poster_path: posterPath,
       season: type === "tv" ? season : undefined,
-      episode: type === "tv" ? episodeNum || 1 : undefined,
+      episode: type === "tv" || isAnime ? epToPlay : undefined,
     });
 
     navigation.navigate("Player", {
       id,
       type,
       title,
-      poster_path: item.poster_path,
+      poster_path: posterPath,
       season: type === "tv" ? season : undefined,
-      episode: type === "tv" ? episodeNum || 1 : undefined,
+      episode: type === "tv" || isAnime ? epToPlay : undefined,
+      isAnime,
+      audioTrack,
     });
   };
 
@@ -109,7 +151,7 @@ export default function DetailScreen({ route, navigation }) {
       id,
       type,
       title,
-      poster_path: item.poster_path,
+      poster_path: posterPath,
     });
     setSaved(res.exists);
   };
@@ -161,10 +203,10 @@ export default function DetailScreen({ route, navigation }) {
 
           {/* Metadata Row */}
           <View style={styles.metaRow}>
-            {item.vote_average ? (
+            {score ? (
               <View style={styles.ratingBadge}>
                 <Star color="#FFD700" size={12} fill="#FFD700" style={{ marginRight: 4 }} />
-                <Text style={styles.ratingText}>{item.vote_average.toFixed(1)}</Text>
+                <Text style={styles.ratingText}>{score}</Text>
               </View>
             ) : null}
 
@@ -176,7 +218,14 @@ export default function DetailScreen({ route, navigation }) {
             ) : null}
 
             <View style={styles.metaPill}>
-              {type === "tv" ? (
+              {isAnime ? (
+                <>
+                  <Sparkles color="#FF2D55" size={12} style={{ marginRight: 4 }} />
+                  <Text style={styles.metaPillText}>
+                    {item.episodes || 12} Episodes
+                  </Text>
+                </>
+              ) : type === "tv" ? (
                 <>
                   <Tv color="#8E8E93" size={12} style={{ marginRight: 4 }} />
                   <Text style={styles.metaPillText}>
@@ -195,11 +244,34 @@ export default function DetailScreen({ route, navigation }) {
           {/* Genres Row */}
           {item.genres && item.genres.length > 0 && (
             <View style={styles.genresRow}>
-              {item.genres.map((g) => (
-                <View key={g.id} style={styles.genreTag}>
-                  <Text style={styles.genreTagText}>{g.name}</Text>
+              {item.genres.map((g, idx) => (
+                <View key={idx} style={styles.genreTag}>
+                  <Text style={styles.genreTagText}>{typeof g === "string" ? g : g.name}</Text>
                 </View>
               ))}
+            </View>
+          )}
+
+          {/* Anime Sub/Dub Option */}
+          {isAnime && (
+            <View style={styles.audioToggleRow}>
+              <Text style={styles.audioToggleLabel}>Audio:</Text>
+              <TouchableOpacity
+                style={[styles.audioPill, audioTrack === "sub" && styles.audioPillActive]}
+                onPress={() => setAudioTrack("sub")}
+              >
+                <Text style={[styles.audioPillText, audioTrack === "sub" && styles.audioPillTextActive]}>
+                  SUB
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.audioPill, audioTrack === "dub" && styles.audioPillActive]}
+                onPress={() => setAudioTrack("dub")}
+              >
+                <Text style={[styles.audioPillText, audioTrack === "dub" && styles.audioPillTextActive]}>
+                  DUB
+                </Text>
+              </TouchableOpacity>
             </View>
           )}
 
@@ -208,7 +280,7 @@ export default function DetailScreen({ route, navigation }) {
             <TouchableOpacity
               style={styles.playBtn}
               activeOpacity={0.88}
-              onPress={() => play(type === "tv" ? 1 : undefined)}
+              onPress={() => play(1)}
             >
               <Play color="#000000" size={18} fill="#000000" style={{ marginRight: 8 }} />
               <Text style={styles.playBtnText}>Play Now</Text>
@@ -236,28 +308,32 @@ export default function DetailScreen({ route, navigation }) {
           {/* Synopsis */}
           <Text style={styles.sectionHeader}>Synopsis</Text>
           <Text style={styles.overview}>
-            {item.overview || "No synopsis available for this title."}
+            {item.description
+              ? item.description.replace(/<[^>]*>?/gm, "")
+              : item.overview || "No synopsis available for this title."}
           </Text>
 
-          {/* TV Episodes Section */}
-          {type === "tv" && (
+          {/* TV & Anime Episodes Section */}
+          {(type === "tv" || isAnime) && (
             <View style={styles.tvSection}>
               <View style={styles.seasonHeaderRow}>
                 <Text style={styles.sectionHeader}>Episodes</Text>
-                <TouchableOpacity
-                  style={styles.seasonSelectPill}
-                  activeOpacity={0.85}
-                  onPress={() => setSeasonModalVisible(true)}
-                >
-                  <Layers color="#FFFFFF" size={14} style={{ marginRight: 6 }} />
-                  <Text style={styles.seasonSelectText}>Season {season}</Text>
-                  <ChevronDown color="#8E8E93" size={14} style={{ marginLeft: 4 }} />
-                </TouchableOpacity>
+                {type === "tv" && !isAnime && (
+                  <TouchableOpacity
+                    style={styles.seasonSelectPill}
+                    activeOpacity={0.85}
+                    onPress={() => setSeasonModalVisible(true)}
+                  >
+                    <Layers color="#FFFFFF" size={14} style={{ marginRight: 6 }} />
+                    <Text style={styles.seasonSelectText}>Season {season}</Text>
+                    <ChevronDown color="#8E8E93" size={14} style={{ marginLeft: 4 }} />
+                  </TouchableOpacity>
+                )}
               </View>
 
               {episodes.map((ep) => (
                 <TouchableOpacity
-                  key={ep.id}
+                  key={ep.id || ep.episode_number}
                   style={styles.episodeCard}
                   activeOpacity={0.85}
                   onPress={() => play(ep.episode_number)}
@@ -283,7 +359,7 @@ export default function DetailScreen({ route, navigation }) {
             </View>
           )}
 
-          {/* Cast Carousel */}
+          {/* Cast Carousel (Movies/TV) */}
           {castList.length > 0 && (
             <View style={styles.castSection}>
               <Text style={styles.sectionHeader}>Top Cast</Text>
@@ -315,7 +391,7 @@ export default function DetailScreen({ route, navigation }) {
             </View>
           )}
 
-          {/* More Like This Recommendations */}
+          {/* Recommendations */}
           {recommendations.length > 0 && (
             <View style={styles.recommendationsSection}>
               <Text style={styles.sectionHeader}>More Like This</Text>
@@ -356,7 +432,7 @@ export default function DetailScreen({ route, navigation }) {
       </ScrollView>
 
       {/* Season Selection Modal */}
-      {type === "tv" && (
+      {type === "tv" && !isAnime && (
         <Modal
           visible={seasonModalVisible}
           transparent
@@ -423,7 +499,6 @@ const styles = StyleSheet.create({
   },
   loadingText: { color: "#FFFFFF", fontSize: 16, fontWeight: "600" },
 
-  // Hero Backdrop
   heroBackdropContainer: {
     width: "100%",
     height: height * 0.45,
@@ -450,7 +525,6 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255, 255, 255, 0.18)",
   },
 
-  // Panel
   panel: {
     padding: 22,
     borderTopLeftRadius: 28,
@@ -508,7 +582,38 @@ const styles = StyleSheet.create({
   },
   genreTagText: { color: "#8E8E93", fontSize: 11, fontWeight: "600" },
 
-  // Actions
+  audioToggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 14,
+    gap: 8,
+  },
+  audioToggleLabel: {
+    color: "#8E8E93",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  audioPill: {
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 100,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+  },
+  audioPillActive: {
+    backgroundColor: "#FFFFFF",
+    borderColor: "#FFFFFF",
+  },
+  audioPillText: {
+    color: "#8E8E93",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  audioPillTextActive: {
+    color: "#000000",
+  },
+
   actions: {
     flexDirection: "row",
     alignItems: "center",
@@ -551,7 +656,6 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
 
-  // TV Episodes
   tvSection: { marginTop: 10 },
   seasonHeaderRow: {
     flexDirection: "row",
@@ -599,7 +703,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 
-  // Cast
   castSection: { marginTop: 14 },
   castContent: { gap: 12, paddingVertical: 8 },
   castCard: { width: 85, alignItems: "center" },
@@ -615,7 +718,6 @@ const styles = StyleSheet.create({
   castName: { color: "#FFFFFF", fontSize: 11, fontWeight: "700", textAlign: "center" },
   castCharacter: { color: "#8E8E93", fontSize: 10, textAlign: "center" },
 
-  // Recommendations
   recommendationsSection: { marginTop: 14, marginBottom: 30 },
   recommendationsContent: { gap: 12, paddingVertical: 8 },
   recCard: { width: 115 },
@@ -630,7 +732,6 @@ const styles = StyleSheet.create({
   },
   recTitle: { color: "#FFFFFF", fontSize: 12, fontWeight: "600" },
 
-  // Season Modal
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.75)",
