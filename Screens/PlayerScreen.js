@@ -1,12 +1,26 @@
 import { StatusBar } from "expo-status-bar";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { ArrowLeft, RefreshCw, AlertCircle } from "lucide-react-native";
+import {
+  ArrowLeft,
+  Play,
+  Pause,
+  RotateCcw,
+  RotateCw,
+  Maximize2,
+  Minimize2,
+  RefreshCw,
+  AlertCircle,
+  Volume2,
+  VolumeX,
+  Sparkles,
+} from "lucide-react-native";
 import { useEffect, useState, useCallback, useRef } from "react";
 import {
   ActivityIndicator,
   Pressable,
   StyleSheet,
   Text,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
 import { WebView } from "react-native-webview";
@@ -37,6 +51,15 @@ export default function PlayerScreen({ route, navigation }) {
   );
   const [error, setError] = useState(null);
 
+  // Custom HUD States
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [isMuted, setIsMuted] = useState(false);
+  const [contentFit, setContentFit] = useState("contain");
+  const hideControlsTimer = useRef(null);
+
   const player = useVideoPlayer(
     isDirectVideo && activeStreamUrl
       ? { uri: activeStreamUrl, headers: activeHeaders || {} }
@@ -48,6 +71,92 @@ export default function PlayerScreen({ route, navigation }) {
       }
     }
   );
+
+  // Controls auto-hide timer
+  const resetHideTimer = useCallback(() => {
+    if (hideControlsTimer.current) {
+      clearTimeout(hideControlsTimer.current);
+    }
+    setControlsVisible(true);
+    hideControlsTimer.current = setTimeout(() => {
+      setControlsVisible(false);
+    }, 4000);
+  }, []);
+
+  const toggleControls = () => {
+    if (controlsVisible) {
+      setControlsVisible(false);
+      if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current);
+    } else {
+      resetHideTimer();
+    }
+  };
+
+  const formatTime = (seconds) => {
+    if (!seconds || isNaN(seconds)) return "00:00";
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    const hours = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    if (hours > 0) {
+      return `${hours}:${remMins < 10 ? "0" : ""}${remMins}:${secs < 10 ? "0" : ""}${secs}`;
+    }
+    return `${mins < 10 ? "0" : ""}${mins}:${secs < 10 ? "0" : ""}${secs}`;
+  };
+
+  // Video playback action handlers
+  const handlePlayPause = () => {
+    resetHideTimer();
+    if (!player) return;
+    if (isPlaying) {
+      player.pause();
+      setIsPlaying(false);
+    } else {
+      player.play();
+      setIsPlaying(true);
+    }
+  };
+
+  const handleSeekBy = (seconds) => {
+    resetHideTimer();
+    if (!player) return;
+    if (typeof player.seekBy === "function") {
+      player.seekBy(seconds);
+    } else if (typeof player.currentTime === "number") {
+      player.currentTime = Math.max(0, Math.min(player.currentTime + seconds, duration));
+    }
+  };
+
+  const handleToggleMute = () => {
+    resetHideTimer();
+    if (!player) return;
+    player.muted = !isMuted;
+    setIsMuted(!isMuted);
+  };
+
+  const handleToggleFit = () => {
+    resetHideTimer();
+    setContentFit((prev) => (prev === "contain" ? "cover" : "contain"));
+  };
+
+  // Video player time & status tracking
+  useEffect(() => {
+    if (!player || !isDirectVideo) return;
+
+    const interval = setInterval(() => {
+      if (typeof player.currentTime === "number") {
+        setCurrentTime(player.currentTime);
+      }
+      if (typeof player.duration === "number" && player.duration > 0) {
+        setDuration(player.duration);
+      }
+      if (typeof player.playing === "boolean") {
+        setIsPlaying(player.playing);
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [player, isDirectVideo]);
 
   const resolveStream = useCallback(async () => {
     if (initialStreamUrl) {
@@ -89,8 +198,8 @@ export default function PlayerScreen({ route, navigation }) {
           player.play();
         }
         setLoading(false);
+        resetHideTimer();
       } else {
-        // Fallback directly to provider embed
         const fallbackUrl =
           type === "tv"
             ? `https://vixsrc.to/tv/${id}/${season}/${episode}`
@@ -101,7 +210,6 @@ export default function PlayerScreen({ route, navigation }) {
         setLoading(false);
       }
     } catch {
-      // Fallback directly to provider embed
       const fallbackUrl =
         type === "tv"
           ? `https://vixsrc.to/tv/${id}/${season}/${episode}`
@@ -111,7 +219,7 @@ export default function PlayerScreen({ route, navigation }) {
       setIsDirectVideo(false);
       setLoading(false);
     }
-  }, [id, type, season, episode, title, initialStreamUrl, initialHeaders, player]);
+  }, [id, type, season, episode, title, initialStreamUrl, initialHeaders, player, resetHideTimer]);
 
   useEffect(() => {
     resolveStream();
@@ -128,72 +236,184 @@ export default function PlayerScreen({ route, navigation }) {
     }).catch(() => {});
   }, [id, type, season, episode, title, poster_path]);
 
+  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+
   return (
     <View style={styles.container}>
       <StatusBar hidden style="light" />
 
       {activeStreamUrl && !loading && !error ? (
-        <View style={styles.videoFrame}>
-          {isDirectVideo ? (
-            <VideoView
-              player={player}
-              style={styles.video}
-              nativeControls
-              contentFit="contain"
-              fullscreenOptions={{ enable: true }}
-              allowsPictureInPicture
-              surfaceType="surfaceView"
-            />
-          ) : (
-            <WebView
-              source={{
-                uri: activeStreamUrl,
-                headers: {
-                  Referer: "https://vixsrc.to/",
-                  "User-Agent":
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                },
-              }}
-              style={styles.webview}
-              allowsFullscreenVideo
-              javaScriptEnabled
-              domStorageEnabled
-              mediaPlaybackRequiresUserAction={false}
-              allowsInlineMediaPlayback
-              androidHardwareAccelerationDisabled={false}
-              setSupportMultipleWindows={false}
-              onShouldStartLoadWithRequest={(request) => {
-                // Prevent external redirect popups
-                return (
-                  request.url.includes("vixsrc") ||
-                  request.url.includes("vidsrc") ||
-                  request.url.includes("m3u8") ||
-                  request.url.includes("stream") ||
-                  request.url.startsWith("about:") ||
-                  request.url.startsWith("blob:")
-                );
-              }}
-            />
-          )}
+        <TouchableWithoutFeedback onPress={toggleControls}>
+          <View style={styles.videoFrame}>
+            {isDirectVideo ? (
+              <VideoView
+                player={player}
+                style={styles.video}
+                nativeControls={false}
+                contentFit={contentFit}
+                fullscreenOptions={{ enable: true }}
+                allowsPictureInPicture
+                surfaceType="surfaceView"
+              />
+            ) : (
+              <WebView
+                source={{
+                  uri: activeStreamUrl,
+                  headers: {
+                    Referer: "https://vixsrc.to/",
+                    "User-Agent":
+                      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                  },
+                }}
+                style={styles.webview}
+                allowsFullscreenVideo
+                javaScriptEnabled
+                domStorageEnabled
+                mediaPlaybackRequiresUserAction={false}
+                allowsInlineMediaPlayback
+                androidHardwareAccelerationDisabled={false}
+                setSupportMultipleWindows={false}
+                onShouldStartLoadWithRequest={(request) => {
+                  return (
+                    request.url.includes("vixsrc") ||
+                    request.url.includes("vidsrc") ||
+                    request.url.includes("m3u8") ||
+                    request.url.includes("stream") ||
+                    request.url.startsWith("about:") ||
+                    request.url.startsWith("blob:")
+                  );
+                }}
+              />
+            )}
 
-          <Pressable
-            accessibilityLabel="Go back"
-            hitSlop={12}
-            onPress={() => navigation.goBack()}
-            style={styles.backButton}
-          >
-            <ArrowLeft color="#fff" size={22} />
-          </Pressable>
+            {/* Custom Apple Liquid Glass Cinema HUD */}
+            {controlsVisible && (
+              <View style={styles.hudOverlay} pointerEvents="box-none">
+                {/* Top Liquid Glass Island */}
+                <View style={styles.topBar}>
+                  <Pressable
+                    accessibilityLabel="Go back"
+                    hitSlop={12}
+                    onPress={() => navigation.goBack()}
+                    style={styles.glassCircleButton}
+                  >
+                    <ArrowLeft color="#FFFFFF" size={20} />
+                  </Pressable>
 
-          {isDirectVideo && (
-            <View pointerEvents="none" style={styles.titleOverlay}>
-              <Text numberOfLines={1} style={styles.titleText}>
-                {title}
-                {type === "tv" ? ` - S${season} E${episode}` : ""}
-              </Text>
-            </View>
-          )}
-        </View>
+                  <BlurView tint="dark" intensity={85} style={styles.titleGlassPill}>
+                    <Text numberOfLines={1} style={styles.titleText}>
+                      {title}
+                    </Text>
+                    {type === "tv" && (
+                      <View style={styles.episodeTag}>
+                        <Text style={styles.episodeTagText}>
+                          S{season} E{episode}
+                        </Text>
+                      </View>
+                    )}
+                  </BlurView>
+
+                  <View style={styles.topRightActions}>
+                    <Pressable
+                      accessibilityLabel="Toggle Fit"
+                      hitSlop={8}
+                      onPress={handleToggleFit}
+                      style={styles.glassCircleButton}
+                    >
+                      {contentFit === "contain" ? (
+                        <Maximize2 color="#FFFFFF" size={18} />
+                      ) : (
+                        <Minimize2 color="#FFFFFF" size={18} />
+                      )}
+                    </Pressable>
+                  </View>
+                </View>
+
+                {/* Center Cinema Controls for Direct Video */}
+                {isDirectVideo && (
+                  <View style={styles.centerControls} pointerEvents="box-none">
+                    <Pressable
+                      accessibilityLabel="Rewind 10 seconds"
+                      hitSlop={12}
+                      onPress={() => handleSeekBy(-10)}
+                      style={styles.glassSeekButton}
+                    >
+                      <RotateCcw color="#FFFFFF" size={24} />
+                      <Text style={styles.seekBadge}>10</Text>
+                    </Pressable>
+
+                    <Pressable
+                      accessibilityLabel={isPlaying ? "Pause" : "Play"}
+                      hitSlop={16}
+                      onPress={handlePlayPause}
+                      style={styles.heroPlayButton}
+                    >
+                      <BlurView tint="dark" intensity={95} style={styles.heroPlayBlur}>
+                        {isPlaying ? (
+                          <Pause color="#FFFFFF" size={32} />
+                        ) : (
+                          <Play color="#FFFFFF" size={32} style={{ marginLeft: 4 }} />
+                        )}
+                      </BlurView>
+                    </Pressable>
+
+                    <Pressable
+                      accessibilityLabel="Forward 10 seconds"
+                      hitSlop={12}
+                      onPress={() => handleSeekBy(10)}
+                      style={styles.glassSeekButton}
+                    >
+                      <RotateCw color="#FFFFFF" size={24} />
+                      <Text style={styles.seekBadge}>10</Text>
+                    </Pressable>
+                  </View>
+                )}
+
+                {/* Bottom Liquid Glass Scrubber Dock */}
+                {isDirectVideo && (
+                  <View style={styles.bottomDockContainer}>
+                    <BlurView tint="dark" intensity={88} style={styles.bottomGlassDock}>
+                      <Pressable
+                        accessibilityLabel="Mute toggle"
+                        hitSlop={8}
+                        onPress={handleToggleMute}
+                        style={styles.dockIconButton}
+                      >
+                        {isMuted ? (
+                          <VolumeX color="#FFFFFF" size={18} />
+                        ) : (
+                          <Volume2 color="#FFFFFF" size={18} />
+                        )}
+                      </Pressable>
+
+                      <Text style={styles.timeLabel}>{formatTime(currentTime)}</Text>
+
+                      {/* Progress Bar */}
+                      <View style={styles.progressBarTrack}>
+                        <View
+                          style={[
+                            styles.progressBarFill,
+                            { width: `${Math.min(Math.max(progressPercent, 0), 100)}%` },
+                          ]}
+                        />
+                        <View style={styles.progressGlowHead} />
+                      </View>
+
+                      <Text style={styles.timeLabel}>
+                        {duration > 0 ? formatTime(duration) : "--:--"}
+                      </Text>
+
+                      <View style={styles.oledQualityBadge}>
+                        <Sparkles color="#FFFFFF" size={12} style={{ marginRight: 4 }} />
+                        <Text style={styles.oledQualityText}>OLED</Text>
+                      </View>
+                    </BlurView>
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
+        </TouchableWithoutFeedback>
       ) : loading ? (
         <View style={styles.centerContainer}>
           <Pressable
@@ -202,17 +422,19 @@ export default function PlayerScreen({ route, navigation }) {
             onPress={() => navigation.goBack()}
             style={styles.backButtonTop}
           >
-            <ArrowLeft color="#fff" size={22} />
+            <ArrowLeft color="#fff" size={20} />
           </Pressable>
 
-          <BlurView tint="dark" intensity={90} style={styles.glassCard}>
+          <BlurView tint="dark" intensity={88} style={styles.glassCard}>
             <ActivityIndicator size="large" color="#FFFFFF" />
-            <Text style={styles.loadingTitle}>StreamGlass Player</Text>
+            <Text style={styles.loadingTitle}>StreamGlass Cinema</Text>
             <Text style={styles.loadingSubtitle}>{title}</Text>
             {type === "tv" && (
-              <Text style={styles.episodeBadge}>
-                Season {season} • Episode {episode}
-              </Text>
+              <View style={styles.episodePill}>
+                <Text style={styles.episodePillText}>
+                  Season {season} • Episode {episode}
+                </Text>
+              </View>
             )}
             <Text style={styles.statusText}>{statusMessage}</Text>
           </BlurView>
@@ -225,10 +447,10 @@ export default function PlayerScreen({ route, navigation }) {
             onPress={() => navigation.goBack()}
             style={styles.backButtonTop}
           >
-            <ArrowLeft color="#fff" size={22} />
+            <ArrowLeft color="#fff" size={20} />
           </Pressable>
 
-          <BlurView tint="dark" intensity={90} style={styles.glassCard}>
+          <BlurView tint="dark" intensity={88} style={styles.glassCard}>
             <AlertCircle color="#FF453A" size={42} style={{ marginBottom: 12 }} />
             <Text style={styles.errorTitle}>Stream Unavailable</Text>
             <Text style={styles.errorMessage}>{error}</Text>
@@ -253,19 +475,185 @@ const styles = StyleSheet.create({
   videoFrame: { flex: 1, backgroundColor: "#000000" },
   video: { flex: 1, backgroundColor: "#000000" },
   webview: { flex: 1, backgroundColor: "#000000" },
-  backButton: {
-    position: "absolute",
-    top: 24,
-    left: 16,
+
+  // HUD Overlay
+  hudOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "space-between",
+    padding: 16,
+    zIndex: 999,
+  },
+
+  // Top Bar & Island
+  topBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 12,
+    gap: 12,
+  },
+  glassCircleButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.65)",
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.15)",
-    zIndex: 999,
+    borderColor: "rgba(255, 255, 255, 0.18)",
+  },
+  titleGlassPill: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 100,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.16)",
+    overflow: "hidden",
+  },
+  titleText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+  },
+  episodeTag: {
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 100,
+    marginLeft: 8,
+  },
+  episodeTagText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  topRightActions: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  // Center Controls
+  centerControls: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 36,
+  },
+  glassSeekButton: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.16)",
+  },
+  seekBadge: {
+    position: "absolute",
+    bottom: 8,
+    color: "#FFFFFF",
+    fontSize: 9,
+    fontWeight: "800",
+  },
+  heroPlayButton: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    overflow: "hidden",
+    shadowColor: "#FFFFFF",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  heroPlayBlur: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 38,
+    borderWidth: 1.5,
+    borderColor: "rgba(255, 255, 255, 0.28)",
+  },
+
+  // Bottom Liquid Glass Dock
+  bottomDockContainer: {
+    marginBottom: 8,
+    alignItems: "center",
+  },
+  bottomGlassDock: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.16)",
+    overflow: "hidden",
+    gap: 12,
+  },
+  dockIconButton: {
+    padding: 4,
+  },
+  timeLabel: {
+    color: "#8E8E93",
+    fontSize: 12,
+    fontWeight: "600",
+    fontVariant: ["tabular-nums"],
+    minWidth: 44,
+    textAlign: "center",
+  },
+  progressBarTrack: {
+    flex: 1,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "rgba(255, 255, 255, 0.18)",
+    overflow: "hidden",
+    justifyContent: "center",
+  },
+  progressBarFill: {
+    height: "100%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 3,
+  },
+  progressGlowHead: {
+    position: "absolute",
+    right: 0,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#FFFFFF",
+  },
+  oledQualityBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 100,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.18)",
+  },
+  oledQualityText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+
+  // Loading & Error States
+  centerContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+    backgroundColor: "#000000",
   },
   backButtonTop: {
     position: "absolute",
@@ -276,26 +664,10 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.15)",
+    borderColor: "rgba(255, 255, 255, 0.18)",
     zIndex: 999,
-  },
-  titleOverlay: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    padding: 18,
-    backgroundColor: "rgba(0, 0, 0, 0.65)",
-  },
-  titleText: { color: "#FFFFFF", fontSize: 16, fontWeight: "700" },
-  centerContainer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 24,
-    backgroundColor: "#000000",
   },
   glassCard: {
     width: "100%",
@@ -304,7 +676,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.15)",
+    borderColor: "rgba(255, 255, 255, 0.18)",
     overflow: "hidden",
   },
   loadingTitle: {
@@ -320,15 +692,19 @@ const styles = StyleSheet.create({
     marginTop: 4,
     textAlign: "center",
   },
-  episodeBadge: {
-    color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "600",
+  episodePill: {
     backgroundColor: "rgba(255, 255, 255, 0.12)",
     paddingVertical: 4,
     paddingHorizontal: 12,
     borderRadius: 100,
     marginTop: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.16)",
+  },
+  episodePillText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
   },
   statusText: {
     color: "#8E8E93",
