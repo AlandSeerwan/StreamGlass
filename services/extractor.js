@@ -2,11 +2,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const EXTRACTOR_STORAGE_KEY = "@streamglass_custom_extractor_url";
 
-// Default public / community serverless instances for vidsrc-api / vidsrc-new
+// Default serverless instances for vidsrc / vixsrc stream extraction
 export const DEFAULT_EXTRACTOR_ENDPOINTS = [
+  "https://stream-glass.vercel.app",
   "https://vidsrc-api.vercel.app",
   "https://vidsrc-new.vercel.app",
-  "https://vidsrc-extractor.vercel.app",
 ];
 
 /**

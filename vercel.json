@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "rewrites": [
+    { "source": "/vidsrc/:id/:season/:episode", "destination": "/api/vidsrc?id=:id&type=tv&season=:season&episode=:episode" },
+    { "source": "/vidsrc/:id", "destination": "/api/vidsrc?id=:id&type=movie" },
+    { "source": "/tv/:id/:season/:episode", "destination": "/api/vidsrc?id=:id&type=tv&season=:season&episode=:episode" },
+    { "source": "/movie/:id", "destination": "/api/vidsrc?id=:id&type=movie" },
+    { "source": "/api/:match*", "destination": "/api/:match*" }
+  ]
+}
