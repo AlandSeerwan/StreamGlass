@@ -37,7 +37,8 @@ const { width, height } = Dimensions.get("window");
 // ═══════════════════════════════════════════════════════════
 
 const PosterCard = memo(({ item, onPress }) => {
-  const posterUrl = getImageUrl(item?.poster_path, "w500");
+  const imagePath = item?.poster_path || item?.backdrop_path || item?.coverImage || item?.image;
+  const posterUrl = getImageUrl(imagePath, "w500");
   const rating = item?.vote_average ? item.vote_average.toFixed(1) : null;
   const title = item?.title || item?.name || "Untitled";
 
@@ -68,7 +69,8 @@ const PosterCard = memo(({ item, onPress }) => {
 });
 
 const HistoryCard = memo(({ item, onPress }) => {
-  const posterUrl = getImageUrl(item?.poster_path, "w500");
+  const imagePath = item?.backdrop_path || item?.poster_path || item?.coverImage || item?.image;
+  const posterUrl = getImageUrl(imagePath, "w500");
 
   return (
     <TouchableOpacity
@@ -76,13 +78,17 @@ const HistoryCard = memo(({ item, onPress }) => {
       activeOpacity={0.85}
       onPress={onPress}
     >
-      <Image
-        source={{ uri: posterUrl }}
-        style={styles.historyPoster}
-        contentFit="cover"
-        transition={250}
-        recyclingKey={`history-${item?.id}`}
-      />
+      {posterUrl ? (
+        <Image
+          source={{ uri: posterUrl }}
+          style={styles.historyPoster}
+          contentFit="cover"
+          transition={250}
+          recyclingKey={`history-${item?.id}`}
+        />
+      ) : (
+        <View style={[styles.historyPoster, { backgroundColor: "#1C1C1E" }]} />
+      )}
       <View style={styles.historyGradient} />
       <View style={styles.historyMeta}>
         <View style={styles.historyMetaLeft}>
@@ -180,19 +186,23 @@ export default function HomeScreen({ navigation }) {
 
   const playItem = async (item) => {
     const type = typeFor(item);
+    const posterPath = item?.poster_path || item?.backdrop_path;
+    const backdropPath = item?.backdrop_path || item?.poster_path;
     try {
       await saveToHistory({
         id: item?.id,
         type,
         title: titleFor(item),
-        poster_path: item?.poster_path,
+        poster_path: posterPath,
+        backdrop_path: backdropPath,
       });
     } catch {}
     navigation.navigate("Player", {
       id: item?.id,
       type,
       title: titleFor(item),
-      poster_path: item?.poster_path,
+      poster_path: posterPath,
+      backdrop_path: backdropPath,
     });
   };
 
@@ -200,9 +210,8 @@ export default function HomeScreen({ navigation }) {
     navigation.navigate("Details", { id: item?.id, type: typeFor(item) });
   };
 
-  const heroBackdropUri = heroItem
-    ? getImageUrl(heroItem?.backdrop_path || heroItem?.poster_path, "original")
-    : null;
+  const heroImage = heroItem?.backdrop_path || heroItem?.poster_path;
+  const heroBackdropUri = heroImage ? getImageUrl(heroImage, "w780") : null;
 
   return (
     <ScrollView
@@ -225,14 +234,13 @@ export default function HomeScreen({ navigation }) {
               style={StyleSheet.absoluteFillObject}
               contentFit="cover"
               priority="high"
-              transition={500}
+              transition={300}
             />
           )}
 
-          {/* Multi-layer gradient: vivid top → black bottom */}
-          <View pointerEvents="none" style={styles.heroGradientTop} />
-          <View pointerEvents="none" style={styles.heroGradientMiddle} />
-          <View pointerEvents="none" style={styles.heroGradientBottom} />
+          {/* Vignette Overlay */}
+          <View pointerEvents="none" style={styles.heroGradientOverlay} />
+          <View pointerEvents="none" style={styles.heroBottomFade} />
 
           {/* Glass Hero Card */}
           <BlurView tint="dark" intensity={85} style={styles.heroGlassCard}>
@@ -425,29 +433,17 @@ const styles = StyleSheet.create({
     position: "relative",
     overflow: "hidden",
   },
-  heroGradientTop: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: "30%",
-    backgroundColor: "rgba(0, 0, 0, 0.15)",
+  heroGradientOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.2)",
   },
-  heroGradientMiddle: {
-    position: "absolute",
-    top: "30%",
-    left: 0,
-    right: 0,
-    height: "30%",
-    backgroundColor: "rgba(0, 0, 0, 0.30)",
-  },
-  heroGradientBottom: {
+  heroBottomFade: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
-    height: "50%",
-    backgroundColor: "rgba(0, 0, 0, 0.75)",
+    height: "45%",
+    backgroundColor: "rgba(0, 0, 0, 0.55)",
   },
   heroGlassCard: {
     width: "100%",

@@ -347,76 +347,81 @@ export default function PlayerScreen({ route, navigation }) {
       <StatusBar hidden style="light" />
 
       {activeStreamUrl && !loading && !error ? (
-        <TouchableWithoutFeedback onPress={toggleControls}>
-          <View style={styles.videoFrame}>
-            {isDirectVideo ? (
-              <VideoView
-                player={player}
-                style={styles.video}
-                nativeControls={false}
-                contentFit={contentFit}
-                allowsPictureInPicture
-                surfaceType="surfaceView"
-              />
-            ) : (
-              <WebView
-                source={{
-                  html: `
-                    <!DOCTYPE html>
-                    <html>
-                      <head>
-                        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-                        <style>
-                          * { margin: 0; padding: 0; box-sizing: border-box; background: #000; }
-                          html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
-                          iframe { width: 100%; height: 100%; border: 0; position: absolute; top: 0; left: 0; }
-                        </style>
-                      </head>
-                      <body>
-                        <iframe
-                          src="${activeStreamUrl}"
-                          allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-                          allowfullscreen="true"
-                          webkitallowfullscreen="true"
-                          mozallowfullscreen="true"
-                        ></iframe>
-                      </body>
-                    </html>
-                  `,
-                  baseUrl: isAnime ? "https://miruro.tv" : "https://vixsrc.to",
-                }}
-                style={styles.webview}
-                originWhitelist={["*"]}
-                allowsFullscreenVideo
-                javaScriptEnabled
-                domStorageEnabled
-                mediaPlaybackRequiresUserAction={false}
-                allowsInlineMediaPlayback
-                androidHardwareAccelerationDisabled={false}
-                setSupportMultipleWindows={false}
-                onShouldStartLoadWithRequest={(request) => {
-                  return (
-                    request.url.includes("vixsrc") ||
-                    request.url.includes("vidsrc") ||
-                    request.url.includes("miruro") ||
-                    request.url.includes("megavid") ||
-                    request.url.includes("anixo") ||
-                    request.url.includes("autoembed") ||
-                    request.url.includes("smashy") ||
-                    request.url.includes("2embed") ||
-                    request.url.includes("anime") ||
-                    request.url.includes("m3u8") ||
-                    request.url.includes("stream") ||
-                    request.url.startsWith("about:") ||
-                    request.url.startsWith("blob:")
-                  );
-                }}
-              />
-            )}
+        <View style={styles.videoFrame}>
+          {isDirectVideo ? (
+            <VideoView
+              player={player}
+              style={styles.video}
+              nativeControls={false}
+              contentFit={contentFit}
+              allowsPictureInPicture
+              surfaceType="surfaceView"
+            />
+          ) : (
+            <WebView
+              source={{
+                html: `
+                  <!DOCTYPE html>
+                  <html>
+                    <head>
+                      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+                      <style>
+                        * { margin: 0; padding: 0; box-sizing: border-box; background: #000; }
+                        html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+                        iframe { width: 100%; height: 100%; border: 0; position: absolute; top: 0; left: 0; }
+                      </style>
+                    </head>
+                    <body>
+                      <iframe
+                        src="${activeStreamUrl}"
+                        allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+                        allowfullscreen="true"
+                        webkitallowfullscreen="true"
+                        mozallowfullscreen="true"
+                      ></iframe>
+                    </body>
+                  </html>
+                `,
+                baseUrl: isAnime ? "https://miruro.tv" : "https://vixsrc.to",
+              }}
+              style={styles.webview}
+              originWhitelist={["*"]}
+              allowsFullscreenVideo
+              javaScriptEnabled
+              domStorageEnabled
+              mediaPlaybackRequiresUserAction={false}
+              allowsInlineMediaPlayback
+              androidHardwareAccelerationDisabled={false}
+              setSupportMultipleWindows={false}
+              onShouldStartLoadWithRequest={(request) => {
+                return (
+                  request.url.includes("vixsrc") ||
+                  request.url.includes("vidsrc") ||
+                  request.url.includes("miruro") ||
+                  request.url.includes("megavid") ||
+                  request.url.includes("anixo") ||
+                  request.url.includes("autoembed") ||
+                  request.url.includes("smashy") ||
+                  request.url.includes("2embed") ||
+                  request.url.includes("anime") ||
+                  request.url.includes("m3u8") ||
+                  request.url.includes("stream") ||
+                  request.url.startsWith("about:") ||
+                  request.url.startsWith("blob:")
+                );
+              }}
+            />
+          )}
 
-            {/* ═══ Netflix HUD Overlay ═══ */}
-            {controlsVisible && (
-              <View style={styles.hudOverlay} pointerEvents="box-none">
+          {/* Fullscreen Touch Interceptor Overlay */}
+          <Pressable
+            style={StyleSheet.absoluteFillObject}
+            onPress={toggleControls}
+          />
+
+          {/* ═══ Netflix HUD Overlay ═══ */}
+          {controlsVisible && (
+            <View style={styles.hudOverlay} pointerEvents="box-none">
 
                 {/* ── Top Bar ── */}
                 <View style={styles.topBar}>
@@ -583,8 +588,7 @@ export default function PlayerScreen({ route, navigation }) {
               </View>
             )}
           </View>
-        </TouchableWithoutFeedback>
-      ) : loading ? (
+        ) : loading ? (
         /* ── Loading State ── */
         <View style={styles.stateContainer}>
           <Pressable
